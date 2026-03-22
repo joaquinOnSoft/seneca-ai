@@ -1,0 +1,47 @@
+You are a Python developer.
+
+We are going a create a Python application called Seneca-AI
+
+# What is Seneca-AI?
+ - Seneca-AI, hereinafter referred to as Seneca, is a European open-source generative AI project.
+ - It is multi-purpose and cross-platform.
+ - It is an assistant/guide created by and for humans.
+ - It supports and empowers, but does not eliminate or replace.
+
+# Screens
+
+## Main screen
+
+Main window includes a:
+- Application title: "Seneca AI"
+- Top left corner: hamburger icon. When is clicked the lateral menu is shown.
+- Lateral menu is hiden by default. When is shown includes the following items:
+   - New conversation: when clicked the AI model context is cleaned/restarted
+   - Conversations: Shows the title of the latest 20 conversations
+- Input 
+# Python libraries
+
+Use the following libraries to generate the code:
+
+- customtkinter: A modern and customizable python UI-library based on Tkinter: 
+[customtkinter](https://customtkinter.tomschimansky.com)
+- LangChain: provides the engineering platform and open source frameworks developers use to build, test, and deploy reliable AI agents.
+- python-dotenv: reads key-value pairs from a .env file and can set them as environment variables. It helps in the development of applications following the 12-factor principles.
+- Babel: A collection of tools for internationalizing Python applications.
+
+Always use the latest stable version of each library available.
+
+# Code conventions
+
+Follow PEP 8 for formatting, use 4 spaces for indentation, and name functions with snake_case. Limit lines to 79 characters, use docstrings for modules and functions, and organize imports in standard order. Apply type hints where they add clarity.
+
+# Project structure
+
+Separate code into modules by responsibility, use a src/ or package directory for your code, and add tests in a parallel structure. Include a README.md, requirements.txt, and a .gitignore. Keep configuration separate from code.
+
+# Pythonic code
+
+Pythonic code follows Python’s philosophy of readability and simplicity. It uses built-in features like list comprehensions, context managers, and iterators instead of patterns from other languages. Code that is Pythonic feels natural to experienced Python developers.
+
+Reference: 
+ - [Python Best Practices for More Pythonic Code](https://realpython.com/tutorials/best-practices/)
