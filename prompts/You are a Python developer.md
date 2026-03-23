@@ -13,12 +13,29 @@ We are going a create a Python application called Seneca-AI
 ## Main screen
 
 Main window includes a:
+
 - Application title: "Seneca AI"
 - Top left corner: hamburger icon. When is clicked the lateral menu is shown.
-- Lateral menu is hiden by default. When is shown includes the following items:
-   - New conversation: when clicked the AI model context is cleaned/restarted
-   - Conversations: Shows the title of the latest 20 conversations
-- Input 
+- Left-hand side menu (Lateral menu) is hiden by default. When is shown includes the following items:
+	- New conversation: when clicked the AI model context is cleaned/restarted
+	- Conversations: Shows the title of the latest 20 conversations
+- The text box for entering the user’s request is located in the bottom-right corner. It takes up 90% of the horizontal space, leaving a 10-pixel margin on the right.
+- The text box for entering the user’s request is located in the bottom-right corner. It takes up 90% of the horizontal space, leaving a 10-pixel margin on the right, and 15% of the vertical space, leaving a 10-pixel bottom margin.
+Inside it, there are two icons:
+	- A microphone, for converting the user’s spoken prompt into text
+	- A triangle/play icon, for executing the prompt entered by the user. When the play icon is clicked is replaced by a stop/square rectangle to indicate that Seneca is thinking. If the user click on the stop icon the Seneca request is canceled. Once the request is completed the text box is cleared.
+The prompt text must not overlap with the icons
+
+Each prompt entered by the user, once the play icon has been clicked, is displayed in a speech bubble with the arrow pointing to the right, starting from the top.
+
+Seneca AI’s response is displayed below the user’s prompt, in a speech bubble with the arrow pointing to the right.
+
+The conversation bubbles take up the top 85%. If necessary, vertical scrolling will be allowed in the area reserved for the conversation bubbles.
+
+All the text literal are supported in 4 languages: Spanish, English, French and Portuguese. If user language is not supported, english will be used as default language.
+
+Screen mockups uploaded for reference.
+
 # Python libraries
 
 Use the following libraries to generate the code:

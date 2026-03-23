@@ -1,0 +1,1 @@
+"""Seneca-AI UI package."""
