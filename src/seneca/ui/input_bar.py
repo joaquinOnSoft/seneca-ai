@@ -13,9 +13,17 @@ the two icon buttons.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Callable
 
 import customtkinter as ctk
+from PIL import Image
+
+# Make sure the project root is on sys.path when running from src/
+_ROOT = Path(__file__).parent.parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from config.settings import (
     COLOR_ACCENT,
@@ -41,6 +49,8 @@ class InputBar(ctk.CTkFrame):
     on_cancel()     – called when the user clicks ■ (stop).
     """
 
+    DEFAULT_ICON_SIZE = 25
+
     def __init__(
         self,
         parent: ctk.CTkFrame,
@@ -62,7 +72,29 @@ class InputBar(ctk.CTkFrame):
         self._placeholder = placeholder
         self._thinking = False
 
+        self._load_icons()
         self._build()
+
+    def _load_icons(self) -> None:
+        """Load icon images for the buttons."""
+        icons_dir = _ROOT / "assets" / "icons"
+        
+        # Load and resize icons (assuming standard size around 20x20 for button icons)
+        self._icon_play = ctk.CTkImage(
+            light_image=Image.open(icons_dir / "play.png"),
+            dark_image=Image.open(icons_dir / "play-white.png"),
+            size=(self.DEFAULT_ICON_SIZE, self.DEFAULT_ICON_SIZE)
+        )
+        self._icon_stop = ctk.CTkImage(
+            light_image=Image.open(icons_dir / "stop.png"),
+            dark_image=Image.open(icons_dir / "stop-white.png"),
+            size=(self.DEFAULT_ICON_SIZE, self.DEFAULT_ICON_SIZE)
+        )
+        self._icon_mic = ctk.CTkImage(
+            light_image=Image.open(icons_dir / "micro.png"),
+            dark_image=Image.open(icons_dir / "micro-white.png"),
+            size=(self.DEFAULT_ICON_SIZE, self.DEFAULT_ICON_SIZE)
+        )
 
     # ── Construction ──────────────────────────────────────────────────────
 
@@ -94,7 +126,8 @@ class InputBar(ctk.CTkFrame):
         # Microphone button
         self._mic_btn = ctk.CTkButton(
             btn_frame,
-            text="🎤",
+            text="",
+            image=self._icon_mic,
             width=36,
             height=36,
             corner_radius=18,
@@ -108,7 +141,8 @@ class InputBar(ctk.CTkFrame):
         # Send / Stop button
         self._send_btn = ctk.CTkButton(
             btn_frame,
-            text="▶",
+            text="",  # No text, just icon
+            image=self._icon_play,
             width=36,
             height=36,
             corner_radius=18,
@@ -179,12 +213,12 @@ class InputBar(ctk.CTkFrame):
         self._thinking = thinking
         if thinking:
             self._send_btn.configure(
-                text="■", fg_color=COLOR_STOP, hover_color="#c04040"
+                text="", image=self._icon_stop, fg_color=COLOR_STOP, hover_color="#c04040"
             )
             self._text.configure(state="disabled")
         else:
             self._send_btn.configure(
-                text="▶", fg_color=COLOR_ACCENT, hover_color="#3a7ae0"
+                text="", image=self._icon_play, fg_color=COLOR_ACCENT, hover_color="#3a7ae0"
             )
             self._text.configure(state="normal")
             self.clear()

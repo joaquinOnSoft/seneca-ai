@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from tkinter import PhotoImage
 
 import customtkinter as ctk
 
 # Make sure the project root is on sys.path when running from src/
-_ROOT = Path(__file__).resolve().parents[4]
+_ROOT = Path(__file__).parent.parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
@@ -87,6 +88,8 @@ class MainWindow(ctk.CTk):
 
     def _setup_window(self) -> None:
         self.title(APP_TITLE)
+        logo = PhotoImage(file=_ROOT / "assets" / "icons" / "logo-seneca-ai-transparent.png")
+        self.iconphoto(False, logo)
         self.geometry("900x680")
         self.minsize(640, 480)
         self.configure(fg_color=COLOR_BG)
