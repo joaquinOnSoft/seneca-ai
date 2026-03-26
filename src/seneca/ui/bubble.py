@@ -8,7 +8,14 @@ Two flavours:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import customtkinter as ctk
+from PIL import Image
+
+# Make sure the project root is on sys.path
+_ROOT = Path(__file__).parent.parent.parent.parent
 
 from config.settings import (
     COLOR_ACCENT,
@@ -70,12 +77,19 @@ class AssistantBubble(ctk.CTkFrame):
         )
         self.grid_columnconfigure(1, weight=1)
 
+        # Load logo image as avatar
+        logo_path = _ROOT / "assets" / "icons" / "logo-seneca-ai-blue-transparent.png"
+        self._avatar_img = ctk.CTkImage(
+            light_image=Image.open(logo_path),
+            dark_image=Image.open(logo_path),
+            size=(28, 28)
+        )
+
         # Logo / avatar column
         avatar = ctk.CTkLabel(
             self,
-            text="✦",
-            font=ctk.CTkFont(family=FONT_FAMILY, size=18, weight="bold"),
-            text_color=COLOR_ACCENT,
+            text="",
+            image=self._avatar_img,
             width=32,
         )
         avatar.grid(row=0, column=0, padx=(4, 6), pady=(8, 0), sticky="n")

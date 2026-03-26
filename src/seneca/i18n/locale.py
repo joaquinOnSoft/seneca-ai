@@ -14,6 +14,7 @@ from babel import Locale
 # Minimal UI string catalogue  {locale_tag: {key: translation}}
 _CATALOGUE: dict[str, dict[str, str]] = {
     "es_ES": {
+        "app_title": "Seneca AI",
         "new_conversation": "Nueva conversación",
         "conversations": "Conversaciones",
         "placeholder": "Escribe un mensaje…",
@@ -22,6 +23,7 @@ _CATALOGUE: dict[str, dict[str, str]] = {
         "error_prefix": "Error",
     },
     "en_US": {
+        "app_title": "Seneca AI",
         "new_conversation": "New conversation",
         "conversations": "Conversations",
         "placeholder": "Type a message…",
@@ -30,6 +32,7 @@ _CATALOGUE: dict[str, dict[str, str]] = {
         "error_prefix": "Error",
     },
     "fr_FR": {
+        "app_title": "Seneca AI",
         "new_conversation": "Nouvelle conversation",
         "conversations": "Conversations",
         "placeholder": "Tapez un message…",
@@ -38,6 +41,7 @@ _CATALOGUE: dict[str, dict[str, str]] = {
         "error_prefix": "Erreur",
     },
     "de_DE": {
+        "app_title": "Seneca AI",
         "new_conversation": "Neues Gespräch",
         "conversations": "Gespräche",
         "placeholder": "Nachricht eingeben…",

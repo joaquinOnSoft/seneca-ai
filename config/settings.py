@@ -32,6 +32,7 @@ FONT_SIZE_SMALL: int = 11
 
 # ── Layout ────────────────────────────────────────────────────────────────
 SIDEBAR_WIDTH: int = 240
+SIDEBAR_COLLAPSED_WIDTH: int = 60
 SIDEBAR_ANIMATION_MS: int = 180
 INPUT_HEIGHT_RATIO: float = 0.15   # 15 % of window height
 INPUT_MARGIN_BOTTOM: int = 10

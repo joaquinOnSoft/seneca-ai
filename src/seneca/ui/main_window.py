@@ -7,11 +7,11 @@ this class so individual widgets remain decoupled.
 
 Layout (grid)
 ─────────────
-col 0 (0 px / SIDEBAR_WIDTH)  │  col 1 (1*)
+col 0 (SIDEBAR_COLLAPSED_WIDTH / SIDEBAR_WIDTH) │  col 1 (1*)
 ─────────────────────────────────────────────
- [Sidebar – hidden by default] │  [Title bar + hamburger]
-                                │  [Chat area        85%]
-                                │  [Input bar        15%]
+ [Sidebar – persistent]                          │  [Title bar]
+                                                 │  [Chat area        85%]
+                                                 │  [Input bar        15%]
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from config.settings import (
-    APP_TITLE,
     COLOR_ACCENT,
     COLOR_BG,
     COLOR_BORDER,
@@ -42,6 +41,7 @@ from config.settings import (
     INPUT_MARGIN_BOTTOM,
     INPUT_MARGIN_RIGHT,
     SIDEBAR_WIDTH,
+    SIDEBAR_COLLAPSED_WIDTH,
     THEME,
     COLOR_THEME,
 )
@@ -87,15 +87,15 @@ class MainWindow(ctk.CTk):
     # ── Window setup ──────────────────────────────────────────────────────
 
     def _setup_window(self) -> None:
-        self.title(APP_TITLE)
+        self.title(self._i18n.t("app_title"))
         logo = PhotoImage(file=_ROOT / "assets" / "icons" / "logo-seneca-ai-transparent.png")
         self.iconphoto(False, logo)
         self.geometry("900x680")
         self.minsize(640, 480)
         self.configure(fg_color=COLOR_BG)
 
-        # Two-column grid: sidebar (hidden) | main content
-        self.grid_columnconfigure(0, weight=0, minsize=0)
+        # Two-column grid: sidebar (fixed width) | main content (stretchy)
+        self.grid_columnconfigure(0, weight=0, minsize=SIDEBAR_COLLAPSED_WIDTH)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -108,10 +108,12 @@ class MainWindow(ctk.CTk):
     def _build_sidebar(self) -> None:
         self._sidebar = Sidebar(
             parent=self,
+            on_toggle=self._toggle_sidebar,
             on_new_conversation=self._on_new_conversation,
             on_select_conversation=self._on_load_conversation,
+            i18n=self._i18n,
         )
-        # sidebar starts hidden – do not grid it yet
+        self._sidebar.grid(row=0, column=0, sticky="nsew")
 
     def _build_main_panel(self) -> None:
         """Right-hand panel: title bar + chat area + input bar."""
@@ -135,32 +137,17 @@ class MainWindow(ctk.CTk):
         bar.grid_columnconfigure(1, weight=1)
         bar.grid_propagate(False)
 
-        # Hamburger button
-        ham_btn = ctk.CTkButton(
-            bar,
-            text="☰",
-            width=40,
-            height=40,
-            corner_radius=8,
-            fg_color="transparent",
-            hover_color=COLOR_BORDER,
-            font=ctk.CTkFont(size=20),
-            text_color=COLOR_TEXT_PRIMARY,
-            command=self._toggle_sidebar,
-        )
-        ham_btn.grid(row=0, column=0, padx=(10, 4), pady=4)
-
-        # App title
+        # App title (Note: Hamburger is now always in Sidebar)
         title_lbl = ctk.CTkLabel(
             bar,
-            text=APP_TITLE,
+            text=self._i18n.t("app_title"),
             font=ctk.CTkFont(
                 family=FONT_FAMILY, size=FONT_SIZE_TITLE, weight="bold"
             ),
             text_color=COLOR_TEXT_PRIMARY,
             anchor="w",
         )
-        title_lbl.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+        title_lbl.grid(row=0, column=0, padx=16, pady=4, sticky="w")
 
         # Thin separator
         sep = ctk.CTkFrame(
@@ -194,13 +181,11 @@ class MainWindow(ctk.CTk):
     # ── Event handlers ────────────────────────────────────────────────────
 
     def _toggle_sidebar(self) -> None:
-        if self._sidebar.is_visible:
-            self._sidebar.grid_remove()
-            self._sidebar._visible = False
-            self.grid_columnconfigure(0, weight=0, minsize=0)
+        if self._sidebar.is_expanded:
+            self._sidebar.set_expanded(False)
+            self.grid_columnconfigure(0, weight=0, minsize=SIDEBAR_COLLAPSED_WIDTH)
         else:
-            self._sidebar.grid(row=0, column=0, sticky="nsew")
-            self._sidebar._visible = True
+            self._sidebar.set_expanded(True)
             self.grid_columnconfigure(0, weight=0, minsize=SIDEBAR_WIDTH)
 
     def _on_new_conversation(self) -> None:
