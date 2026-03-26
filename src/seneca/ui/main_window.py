@@ -137,10 +137,10 @@ class MainWindow(ctk.CTk):
         bar.grid_columnconfigure(1, weight=1)
         bar.grid_propagate(False)
 
-        # App title (Note: Hamburger is now always in Sidebar)
+        # Empty label to maintain space (Note: Title removed as requested)
         title_lbl = ctk.CTkLabel(
             bar,
-            text=self._i18n.t("app_title"),
+            text="",
             font=ctk.CTkFont(
                 family=FONT_FAMILY, size=FONT_SIZE_TITLE, weight="bold"
             ),
