@@ -1,7 +1,7 @@
 """Seneca-AI – European open-source generative AI assistant."""
 
 __version__ = "0.1.0"
-__author__ = "Seneca-AI Contributors"
+__author__ = "Seneca-AI Contributors (Nacho García & Joaquín Garzón"
 __license__ = "Apache-2.0"
 from . import core
 from . import i18n

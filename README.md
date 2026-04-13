@@ -146,6 +146,8 @@ To add a new locale, extend the `_CATALOGUE` dict in
 
 ---
 
+---
+
 ## Contributing
 
 Pull requests are welcome. Please follow PEP 8, add type hints, and
