@@ -13,6 +13,7 @@ import logging
 import threading
 from typing import Callable, Generator
 
+import json
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -119,7 +120,19 @@ class SenecaAgent:
                 on_done("".join(full_reply))
             except Exception as exc:
                 logger.exception("Agent error: %s", exc)
-                on_error(str(exc))
+                error_str = str(exc)
+                final_error_msg = error_str
+
+                # We try to parse the erros as JSON to extract the 'message'
+                try:
+                    if hasattr(exc, "body") and isinstance(exc.body, dict) and "message" in exc.body:
+                        final_error_msg = str(exc.body["message"])
+                except (json.JSONDecodeError, TypeError):
+                    # Si no es un JSON válido o hay error en el proceso,
+                    # mantenemos el comportamiento actual (error_str)
+                    pass
+
+                on_error(final_error_msg)
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
