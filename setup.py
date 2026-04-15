@@ -20,6 +20,7 @@ setup(
     python_requires=">=3.10",
     install_requires=[
         "customtkinter>=5.2.2",
+        "ctk-markdown>=0.1.4",
         "langchain>=0.3.0",
         "langchain-openai>=0.2.0",
         "langchain-ollama>=0.2.0",
