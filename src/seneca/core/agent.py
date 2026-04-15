@@ -43,7 +43,7 @@ def _build_llm() -> BaseChatModel:
         )
 
     if provider == "ollama":
-        from langchain_community.chat_models import ChatOllama  # noqa: PLC0415
+        from langchain_ollama import ChatOllama  # noqa: PLC0415
         return ChatOllama(
             model=config.ollama_model,
             base_url=config.ollama_base_url,
@@ -120,19 +120,21 @@ class SenecaAgent:
                 on_done("".join(full_reply))
             except Exception as exc:
                 logger.exception("Agent error: %s", exc)
-                error_str = str(exc)
-                final_error_msg = error_str
+                on_error(_get_error_msg(exc))
 
-                # We try to parse the erros as JSON to extract the 'message'
-                try:
-                    if hasattr(exc, "body") and isinstance(exc.body, dict) and "message" in exc.body:
-                        final_error_msg = str(exc.body["message"])
-                except (json.JSONDecodeError, TypeError):
-                    # Si no es un JSON válido o hay error en el proceso,
-                    # mantenemos el comportamiento actual (error_str)
-                    pass
+        def _get_error_msg(exc: Exception) -> str:
+            error_str = str(exc)
+            final_error_msg = error_str
 
-                on_error(final_error_msg)
+            # We try to parse the erros as JSON to extract the 'message'
+            try:
+                if hasattr(exc, "body") and isinstance(exc.body, dict) and "message" in exc.body:
+                    final_error_msg = str(exc.body["message"])
+            except (json.JSONDecodeError, TypeError):
+                # Si no es un JSON válido o hay error en el proceso,
+                # mantenemos el comportamiento actual (error_str)
+                pass
+            return final_error_msg
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()

@@ -22,6 +22,7 @@ setup(
         "customtkinter>=5.2.2",
         "langchain>=0.3.0",
         "langchain-openai>=0.2.0",
+        "langchain-ollama>=0.2.0",
         "langchain-community>=0.3.0",
         "langchain-core>=0.3.0",
         "python-dotenv>=1.0.1",
