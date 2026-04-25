@@ -9,14 +9,14 @@ UI can display text progressively.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
-from typing import Callable, Generator
+from typing import Callable, List, Any
 
-import json
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.language_models.chat_models import BaseChatModel
-
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.tools import StructuredTool
 from seneca.core.conversation import Conversation, Role
 from seneca.utils.config import config
 
@@ -84,11 +84,30 @@ class SenecaAgent:
     def __init__(self) -> None:
         self._llm: BaseChatModel | None = None
         self._cancel_event = threading.Event()
+        self._tools: List[Any] = []
 
     def _get_llm(self) -> BaseChatModel:
         if self._llm is None:
             self._llm = _build_llm()
+            if self._tools:
+                self._llm = self._llm.bind_tools(self._tools)
         return self._llm
+
+    def add_tool(self, tool_func: Callable) -> None:
+        """Add a tool to the LLM."""
+        # Wrap the function as a LangChain StructuredTool if it's not already
+        if not hasattr(tool_func, "name"):
+            tool = StructuredTool.from_function(
+                func=tool_func,
+                name=tool_func.__name__,
+                description=tool_func.__doc__ or f"Execute {tool_func.__name__}"
+            )
+        else:
+            tool = tool_func
+            
+        self._tools.append(tool)
+        # Re-initialize LLM with new tools on next use
+        self._llm = None
 
     def stream_reply(
         self,
@@ -146,3 +165,5 @@ class SenecaAgent:
     def reset(self) -> None:
         """Clear cancellation state (call before a new conversation)."""
         self._cancel_event.clear()
+        self._tools = []
+        self._llm = None

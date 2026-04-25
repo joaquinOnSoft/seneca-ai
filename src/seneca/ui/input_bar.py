@@ -13,12 +13,15 @@ the two icon buttons.
 
 from __future__ import annotations
 
+import os
+import shutil
 import sys
+import tkinter as tk
 from pathlib import Path
 from typing import Callable
 
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageTk
 
 # Make sure the project root is on sys.path when running from src/
 _ROOT = Path(__file__).parent.parent.parent.parent
@@ -28,7 +31,6 @@ if str(_ROOT) not in sys.path:
 from config.settings import (
     COLOR_ACCENT,
     COLOR_BORDER,
-    COLOR_BG,
     COLOR_STOP,
     COLOR_SURFACE,
     COLOR_TEXT_PRIMARY,
@@ -37,6 +39,7 @@ from config.settings import (
     FONT_SIZE_BODY,
 )
 from seneca.utils import audio
+from seneca.utils.Desktop.Windows import text_to_editor
 
 
 class InputBar(ctk.CTkFrame):
@@ -47,15 +50,19 @@ class InputBar(ctk.CTkFrame):
     ---------
     on_submit(text) – called when the user clicks ▶ with non-empty text.
     on_cancel()     – called when the user clicks ■ (stop).
+    on_tool_added(tool_func) - called when a tool is selected from the menu.
     """
 
-    DEFAULT_ICON_SIZE = 25
+    DEFAULT_ICON_SIZE = 26
+    DEFAULT_BUTTON_SIZE = 36
+    DEFAULT_BUTTON_CORNER_RADIUS = 18
 
     def __init__(
         self,
         parent: ctk.CTkFrame,
         on_submit: Callable[[str], None],
         on_cancel: Callable[[], None],
+        on_tool_added: Callable[[Callable], None] = None,
         placeholder: str = "Type a message…",
         **kwargs,
     ) -> None:
@@ -69,8 +76,10 @@ class InputBar(ctk.CTkFrame):
         )
         self._on_submit = on_submit
         self._on_cancel = on_cancel
+        self._on_tool_added = on_tool_added
         self._placeholder = placeholder
         self._thinking = False
+        self._menu_icons = []
 
         self._load_icons()
         self._build()
@@ -96,11 +105,31 @@ class InputBar(ctk.CTkFrame):
             size=(self.DEFAULT_ICON_SIZE, self.DEFAULT_ICON_SIZE)
         )
 
+        self._icon_add = ctk.CTkImage(
+            light_image=Image.open(icons_dir / "add-black.png"),
+            dark_image=Image.open(icons_dir / "add-white.png"),
+            size=(self.DEFAULT_ICON_SIZE, self.DEFAULT_ICON_SIZE)
+        )
+
     # ── Construction ──────────────────────────────────────────────────────
 
     def _build(self) -> None:
-        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+
+        # Add button (left side, bottom-aligned)
+        self._add_btn = ctk.CTkButton(
+            self,
+            text="",
+            image=self._icon_add,
+            width=self.DEFAULT_BUTTON_SIZE,
+            height=self.DEFAULT_BUTTON_SIZE,
+            corner_radius=self.DEFAULT_BUTTON_CORNER_RADIUS,
+            fg_color="transparent",
+            hover_color=COLOR_BORDER,
+            command=self._on_add_click,
+        )
+        self._add_btn.grid(row=0, column=0, padx=(8, 0), pady=8, sticky="sw")
 
         # Multiline text widget (native tk.Text wrapped in CTk style)
         self._text = ctk.CTkTextbox(
@@ -113,7 +142,7 @@ class InputBar(ctk.CTkFrame):
             activate_scrollbars=False,
         )
         self._text.grid(
-            row=0, column=0, padx=(12, 4), pady=8, sticky="nsew"
+            row=0, column=1, padx=(4, 4), pady=8, sticky="nsew"
         )
         self._text.bind("<Return>", self._on_return)
         self._text.bind("<Shift-Return>", lambda e: None)  # allow newline
@@ -121,16 +150,16 @@ class InputBar(ctk.CTkFrame):
 
         # Button frame (right side, bottom-aligned)
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=0, column=1, padx=(0, 8), pady=8, sticky="se")
+        btn_frame.grid(row=0, column=2, padx=(0, 8), pady=8, sticky="se")
 
         # Microphone button
         self._mic_btn = ctk.CTkButton(
             btn_frame,
             text="",
             image=self._icon_mic,
-            width=36,
-            height=36,
-            corner_radius=18,
+            width=self.DEFAULT_BUTTON_SIZE,
+            height=self.DEFAULT_BUTTON_SIZE,
+            corner_radius=self.DEFAULT_BUTTON_CORNER_RADIUS,
             fg_color="transparent",
             hover_color=COLOR_BORDER,
             font=ctk.CTkFont(size=16),
@@ -143,9 +172,9 @@ class InputBar(ctk.CTkFrame):
             btn_frame,
             text="",  # No text, just icon
             image=self._icon_play,
-            width=36,
-            height=36,
-            corner_radius=18,
+            width=self.DEFAULT_BUTTON_SIZE,
+            height=self.DEFAULT_BUTTON_SIZE,
+            corner_radius=self.DEFAULT_BUTTON_CORNER_RADIUS,
             fg_color=COLOR_ACCENT,
             hover_color="#3a7ae0",
             font=ctk.CTkFont(size=14, weight="bold"),
@@ -205,6 +234,65 @@ class InputBar(ctk.CTkFrame):
         self._clear_placeholder()
         self._text.delete("1.0", "end")
         self._text.insert("1.0", text)
+
+    def _on_add_click(self) -> None:
+        """Show a context menu with tools."""
+        menu = tk.Menu(self, tearoff=0)
+        icons_dir = _ROOT / "assets" / "icons"
+        
+        self._menu_icons = []
+        is_dark = ctk.get_appearance_mode().lower() == "dark"
+
+        def add_menu_item(label: str, icon_base_name: str, command: Callable):
+            icon_name = f"{icon_base_name}-white.png" if is_dark else f"{icon_base_name}.png"
+            icon_path = icons_dir / icon_name
+            if not icon_path.exists():
+                icon_path = icons_dir / f"{icon_base_name}.png"
+
+            img = Image.open(icon_path).resize((20, 20), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            self._menu_icons.append(photo)
+            menu.add_command(label=label, image=photo, compound="left", command=command)
+
+        if os.name == "nt":
+            # Windows: Notepad and Writer
+            add_menu_item(
+                "Notepad", 
+                "windows-notepad-icon", 
+                lambda: self._add_tool(text_to_editor.save_and_open_with_notepad)
+            )
+            
+            # Default path for Writer on Windows as per text_to_editor.py
+            swriter_path = r"C:\Program Files (x86)\OpenOffice 4\program\swriter.exe"
+            if os.path.exists(swriter_path):
+                add_menu_item(
+                    "Writer", 
+                    "libreoffice-writer-logo.wine", 
+                    lambda: self._add_tool(text_to_editor.save_and_open_with_swriter)
+                )
+        else:
+            # Linux: Kate and Writer
+            add_menu_item(
+                "Kate", 
+                "windows-notepad-icon", 
+                lambda: self._add_tool(text_to_editor.save_text_to_file)
+            )
+            
+            if shutil.which("swriter"):
+                add_menu_item(
+                    "Writer", 
+                    "libreoffice-writer-logo.wine",
+                    lambda: self._add_tool(text_to_editor.save_and_open_with_swriter)
+                )
+
+        # Show menu above the add button
+        x = self._add_btn.winfo_rootx()
+        y = self._add_btn.winfo_rooty()
+        menu.tk_popup(x, y)
+
+    def _add_tool(self, tool_func: Callable) -> None:
+        if self._on_tool_added:
+            self._on_tool_added(tool_func)
 
     # ── Public API ────────────────────────────────────────────────────────
 

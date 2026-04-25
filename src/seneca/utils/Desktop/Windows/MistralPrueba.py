@@ -7,10 +7,10 @@ Created on Mon Apr 13 10:48:02 2026
 
 
 import subprocess
-
 import time
 
 from langchain_ollama import OllamaLLM
+
 
 def abrir_fichero_notepad(texto, nombre_archivo):
     try:

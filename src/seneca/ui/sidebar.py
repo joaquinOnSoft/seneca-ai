@@ -7,8 +7,6 @@ hamburger icon) and can be expanded to show full menu options.
 
 from __future__ import annotations
 
-import sys
-import tkinter as tk
 from pathlib import Path
 from typing import Callable
 

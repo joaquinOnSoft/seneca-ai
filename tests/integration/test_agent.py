@@ -5,8 +5,8 @@ These tests are skipped unless a real LLM_PROVIDER and credentials are
 configured in the environment, so they do not run in CI by default.
 """
 
-import sys
 import os
+import sys
 import threading
 from pathlib import Path
 

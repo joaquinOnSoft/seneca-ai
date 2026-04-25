@@ -9,9 +9,9 @@ chat area occupies the top 85 % of the right-hand panel.
 from __future__ import annotations
 
 import customtkinter as ctk
+from seneca.ui.bubble import AssistantBubble, UserBubble
 
 from config.settings import COLOR_BG
-from seneca.ui.bubble import AssistantBubble, UserBubble
 
 
 class ChatArea(ctk.CTkScrollableFrame):
@@ -44,7 +44,7 @@ class ChatArea(ctk.CTkScrollableFrame):
         Returns the bubble so the caller can call
         :meth:`~AssistantBubble.append_token` on it.
         """
-        bubble = AssistantBubble(self)
+        bubble = AssistantBubble(self, on_update=self._scroll_to_bottom)
         self._scroll_to_bottom()
         return bubble
 

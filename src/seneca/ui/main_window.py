@@ -19,6 +19,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from tkinter import PhotoImage
+from typing import Callable
 
 import customtkinter as ctk
 
@@ -28,16 +29,12 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from config.settings import (
-    COLOR_ACCENT,
     COLOR_BG,
     COLOR_BORDER,
-    COLOR_SIDEBAR,
     COLOR_SURFACE,
     COLOR_TEXT_PRIMARY,
-    COLOR_TEXT_SECONDARY,
     FONT_FAMILY,
     FONT_SIZE_TITLE,
-    INPUT_HEIGHT_RATIO,
     INPUT_MARGIN_BOTTOM,
     INPUT_MARGIN_RIGHT,
     SIDEBAR_WIDTH,
@@ -166,6 +163,7 @@ class MainWindow(ctk.CTk):
             parent=self._main,
             on_submit=self._on_submit,
             on_cancel=self._on_cancel,
+            on_tool_added=self._on_tool_added,
             placeholder=self._i18n.t("placeholder"),
         )
         self._input.grid(
@@ -234,6 +232,10 @@ class MainWindow(ctk.CTk):
         """User clicked the stop button."""
         self._agent.cancel()
         self._input.set_thinking(False)
+
+    def _on_tool_added(self, tool_func: Callable) -> None:
+        """Called when a tool is selected from the input bar."""
+        self._agent.add_tool(tool_func)
 
     def _on_token(self, token: str) -> None:
         """Deliver a streamed token to the UI (called from worker thread)."""
