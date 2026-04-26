@@ -93,18 +93,39 @@ class SenecaAgent:
                 self._llm = self._llm.bind_tools(self._tools)
         return self._llm
 
+    def supports_tools(self) -> bool:
+        """Check if the current model supports tool calling."""
+        try:
+            llm = self._get_llm()
+            # Inspect the model's capabilities if available in LangChain
+            # BaseChatModel often exposes bind_tools if it supports it.
+            # Some providers have a 'tool_calling' attribute in their profile or similar.
+            if hasattr(llm, 'profile') and llm.profile:
+                # Search for a “tool_calling” property in the profile
+                return getattr(llm.profile, 'tool_calling', False)
+
+            # If the model integration does not have a profile, we cannot tell.
+            logger.warning("The model does not set out a skills profile.")
+            return False
+        except Exception:
+            return False
+
     def add_tool(self, tool_func: Callable) -> None:
         """Add a tool to the LLM."""
+        if not self.supports_tools():
+            logger.warning("Attempted to add tool to a model that doesn't support tool calling.")
+            return
+
         # Wrap the function as a LangChain StructuredTool if it's not already
         if not hasattr(tool_func, "name"):
             tool = StructuredTool.from_function(
                 func=tool_func,
                 name=tool_func.__name__,
-                description=tool_func.__doc__ or f"Execute {tool_func.__name__}"
+                description=tool_func.__doc__ or f"Execute {tool_func.__name__}",
             )
         else:
             tool = tool_func
-            
+
         self._tools.append(tool)
         # Re-initialize LLM with new tools on next use
         self._llm = None
@@ -130,12 +151,32 @@ class SenecaAgent:
             try:
                 llm = self._get_llm()
                 messages = _conv_to_messages(conversation)
+                
+                # To handle tool calls, we track the last message chunk
+                last_chunk = None
+
                 for chunk in llm.stream(messages):
                     if self._cancel_event.is_set():
                         break
+                    
+                    last_chunk = chunk
                     token: str = chunk.content  # type: ignore[assignment]
-                    full_reply.append(token)
-                    on_token(token)
+                    if token:
+                        full_reply.append(token)
+                        on_token(token)
+
+                # Handle tool calls if any were generated
+                if last_chunk and hasattr(last_chunk, "tool_calls") and last_chunk.tool_calls:
+                    for tool_call in last_chunk.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_args = tool_call["args"]
+                        
+                        # Find and execute the corresponding tool
+                        for tool in self._tools:
+                            if tool.name == tool_name:
+                                tool.invoke(tool_args)
+                                break
+
                 on_done("".join(full_reply))
             except Exception as exc:
                 logger.exception("Agent error: %s", exc)
@@ -145,13 +186,12 @@ class SenecaAgent:
             error_str = str(exc)
             final_error_msg = error_str
 
-            # We try to parse the erros as JSON to extract the 'message'
+            # Attempt to parse the error as JSON to extract the 'message' field if present
             try:
                 if hasattr(exc, "body") and isinstance(exc.body, dict) and "message" in exc.body:
                     final_error_msg = str(exc.body["message"])
             except (json.JSONDecodeError, TypeError):
-                # Si no es un JSON válido o hay error en el proceso,
-                # mantenemos el comportamiento actual (error_str)
+                # Fallback to the default string representation of the exception
                 pass
             return final_error_msg
 

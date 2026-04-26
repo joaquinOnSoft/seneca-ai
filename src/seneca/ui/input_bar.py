@@ -3,7 +3,7 @@ src/seneca/ui/input_bar.py – Bottom input bar with mic and send controls.
 
 Layout (right panel, bottom 15 %):
   ┌─────────────────────────────────────────────┐
-  │  Text area (multiline)          🎤  ▶ / ■  │
+  │  Text area (multiline)           🎤  ▶ / ■  │
   └─────────────────────────────────────────────┘
 
 The play icon (▶) transitions to a stop icon (■) while Seneca is
@@ -54,6 +54,7 @@ class InputBar(ctk.CTkFrame):
     """
 
     DEFAULT_ICON_SIZE = 26
+
     DEFAULT_BUTTON_SIZE = 36
     DEFAULT_BUTTON_CORNER_RADIUS = 18
 
@@ -63,6 +64,7 @@ class InputBar(ctk.CTkFrame):
         on_submit: Callable[[str], None],
         on_cancel: Callable[[], None],
         on_tool_added: Callable[[Callable], None] = None,
+        can_add_tools_func: Callable[[], bool] = lambda: True,
         placeholder: str = "Type a message…",
         **kwargs,
     ) -> None:
@@ -77,6 +79,7 @@ class InputBar(ctk.CTkFrame):
         self._on_submit = on_submit
         self._on_cancel = on_cancel
         self._on_tool_added = on_tool_added
+        self._can_add_tools_func = can_add_tools_func
         self._placeholder = placeholder
         self._thinking = False
         self._menu_icons = []
@@ -129,7 +132,11 @@ class InputBar(ctk.CTkFrame):
             hover_color=COLOR_BORDER,
             command=self._on_add_click,
         )
-        self._add_btn.grid(row=0, column=0, padx=(8, 0), pady=8, sticky="sw")
+        if self._can_add_tools_func():
+            self._add_btn.grid(row=0, column=0, padx=(8, 0), pady=8, sticky="sw")
+        else:
+            # If model doesn't support tools, we keep it hidden but initialized
+            self._add_btn.grid_forget()
 
         # Multiline text widget (native tk.Text wrapped in CTk style)
         self._text = ctk.CTkTextbox(
@@ -141,8 +148,10 @@ class InputBar(ctk.CTkFrame):
             wrap="word",
             activate_scrollbars=False,
         )
+        # Adjust padx based on whether add button is visible
+        text_padx_left = 4 if self._can_add_tools_func() else 12
         self._text.grid(
-            row=0, column=1, padx=(4, 4), pady=8, sticky="nsew"
+            row=0, column=1, padx=(text_padx_left, 4), pady=8, sticky="nsew"
         )
         self._text.bind("<Return>", self._on_return)
         self._text.bind("<Shift-Return>", lambda e: None)  # allow newline
@@ -236,7 +245,10 @@ class InputBar(ctk.CTkFrame):
         self._text.insert("1.0", text)
 
     def _on_add_click(self) -> None:
-        """Show a context menu with tools."""
+        """Show a context menu with tools, only if supported by the model."""
+        if not self._can_add_tools_func():
+            return
+
         menu = tk.Menu(self, tearoff=0)
         icons_dir = _ROOT / "assets" / "icons"
         

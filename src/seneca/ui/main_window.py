@@ -164,6 +164,7 @@ class MainWindow(ctk.CTk):
             on_submit=self._on_submit,
             on_cancel=self._on_cancel,
             on_tool_added=self._on_tool_added,
+            can_add_tools_func=self._agent.supports_tools,
             placeholder=self._i18n.t("placeholder"),
         )
         self._input.grid(

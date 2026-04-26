@@ -9,7 +9,6 @@ Two flavours:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
 
 import customtkinter as ctk
 from PIL import Image
@@ -83,12 +82,11 @@ class UserBubble(ctk.CTkFrame):
 class AssistantBubble(ctk.CTkFrame):
     """A left-aligned streaming bubble for Seneca's replies with Markdown support."""
 
-    def __init__(self, parent: ctk.CTkScrollableFrame, on_update: Optional[Callable] = None) -> None:
+    def __init__(self, parent: ctk.CTkScrollableFrame) -> None:
         super().__init__(
             parent,
             fg_color="transparent",
         )
-        self._on_update = on_update
         self.grid_columnconfigure(1, weight=1)
 
         # Load logo image as avatar
@@ -139,8 +137,6 @@ class AssistantBubble(ctk.CTkFrame):
         full_text = "".join(self._text_buffer)
         self._markdown_view.set_markdown(full_text)
         self._update_height()
-        if self._on_update:
-            self._on_update()
 
     def _update_height(self) -> None:
         """Heuristic to adjust textbox height based on content."""
@@ -160,8 +156,6 @@ class AssistantBubble(ctk.CTkFrame):
         self._markdown_view.set_markdown(message)
         self._markdown_view.configure(text_color="#e05c5c")
         self._update_height()
-        if self._on_update:
-            self._on_update()
 
     @property
     def full_text(self) -> str:

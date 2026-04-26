@@ -44,7 +44,7 @@ class ChatArea(ctk.CTkScrollableFrame):
         Returns the bubble so the caller can call
         :meth:`~AssistantBubble.append_token` on it.
         """
-        bubble = AssistantBubble(self, on_update=self._scroll_to_bottom)
+        bubble = AssistantBubble(self)
         self._scroll_to_bottom()
         return bubble
 
