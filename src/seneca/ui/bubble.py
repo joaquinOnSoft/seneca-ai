@@ -137,6 +137,10 @@ class AssistantBubble(ctk.CTkFrame):
         full_text = "".join(self._text_buffer)
         self._markdown_view.set_markdown(full_text)
         self._update_height()
+        
+        # Force parent to scroll to bottom as text grows
+        if hasattr(self.master, "scroll_to_bottom"):
+            self.master.scroll_to_bottom()
 
     def _update_height(self) -> None:
         """Heuristic to adjust textbox height based on content."""
@@ -156,6 +160,8 @@ class AssistantBubble(ctk.CTkFrame):
         self._markdown_view.set_markdown(message)
         self._markdown_view.configure(text_color="#e05c5c")
         self._update_height()
+        if hasattr(self.master, "scroll_to_bottom"):
+            self.master.scroll_to_bottom()
 
     @property
     def full_text(self) -> str:

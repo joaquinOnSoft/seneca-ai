@@ -35,7 +35,7 @@ class ChatArea(ctk.CTkScrollableFrame):
     def add_user_message(self, text: str) -> None:
         """Render *text* in a :class:`UserBubble` and scroll down."""
         UserBubble(self, text)
-        self._scroll_to_bottom()
+        self.scroll_to_bottom()
 
     def add_assistant_bubble(self) -> AssistantBubble:
         """
@@ -45,7 +45,7 @@ class ChatArea(ctk.CTkScrollableFrame):
         :meth:`~AssistantBubble.append_token` on it.
         """
         bubble = AssistantBubble(self)
-        self._scroll_to_bottom()
+        self.scroll_to_bottom()
         return bubble
 
     def clear(self) -> None:
@@ -53,6 +53,6 @@ class ChatArea(ctk.CTkScrollableFrame):
         for widget in self.winfo_children():
             widget.destroy()
 
-    def _scroll_to_bottom(self) -> None:
+    def scroll_to_bottom(self) -> None:
         """Force the scrollable canvas to the very bottom."""
-        self.after(50, lambda: self._parent_canvas.yview_moveto(1.0))
+        self.after(10, lambda: self._parent_canvas.yview_moveto(1.0))

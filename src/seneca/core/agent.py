@@ -97,15 +97,20 @@ class SenecaAgent:
         """Check if the current model supports tool calling."""
         try:
             llm = self._get_llm()
-            # Inspect the model's capabilities if available in LangChain
-            # BaseChatModel often exposes bind_tools if it supports it.
-            # Some providers have a 'tool_calling' attribute in their profile or similar.
+
             if hasattr(llm, 'profile') and llm.profile:
                 # Search for a “tool_calling” property in the profile
                 return getattr(llm.profile, 'tool_calling', False)
+            else:
+                # If the model integration does not have a profile, we cannot tell.
+                logger.warning("The model does not set out a skills profile.")
 
-            # If the model integration does not have a profile, we cannot tell.
-            logger.warning("The model does not set out a skills profile.")
+            # Inspect the model's capabilities if available in LangChain
+            # BaseChatModel often exposes bind_tools if it supports it.
+            # Some providers have a 'tool_calling' attribute in their profile or similar.
+            if  hasattr(llm, "bind_tools"):
+                return callable(getattr(llm, "bind_tools"))
+
             return False
         except Exception:
             return False
