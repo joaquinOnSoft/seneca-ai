@@ -26,9 +26,9 @@ COLOR_STOP: str = "#e05c5c"
 
 # ── Typography ────────────────────────────────────────────────────────────
 FONT_FAMILY: str = "Inter"
-FONT_SIZE_TITLE: int = 14
-FONT_SIZE_BODY: int = 13
-FONT_SIZE_SMALL: int = 11
+FONT_SIZE_TITLE: int = 18
+FONT_SIZE_BODY: int = 17
+FONT_SIZE_SMALL: int = 15
 
 # ── Layout ────────────────────────────────────────────────────────────────
 SIDEBAR_WIDTH: int = 240
