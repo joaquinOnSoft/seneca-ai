@@ -17,6 +17,7 @@ from typing import Callable, List, Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
+
 from seneca.core.conversation import Conversation, Role
 from seneca.utils.config import config
 
@@ -94,26 +95,59 @@ class SenecaAgent:
         return self._llm
 
     def supports_tools(self) -> bool:
-        """Check if the current model supports tool calling."""
+        """Robust check for tool-calling support in an LLM."""
+        llm = None
+
         try:
             llm = self._get_llm()
 
-            if hasattr(llm, 'profile') and llm.profile:
-                # Search for a “tool_calling” property in the profile
-                return getattr(llm.profile, 'tool_calling', False)
-            else:
-                # If the model integration does not have a profile, we cannot tell.
-                logger.warning("The model does not set out a skills profile.")
+            # --- 1. Explicit capability metadata (best case) ---
+            profile = getattr(llm, "profile", None)
+            if profile is not None:
+                tool_flag = getattr(profile, "tool_calling", None)
+                if isinstance(tool_flag, bool):
+                    return tool_flag
 
-            # Inspect the model's capabilities if available in LangChain
-            # BaseChatModel often exposes bind_tools if it supports it.
-            # Some providers have a 'tool_calling' attribute in their profile or similar.
-            if  hasattr(llm, "bind_tools"):
-                return callable(getattr(llm, "bind_tools"))
+            # --- 2. Interface-based detection ---
+            bind_tools = getattr(llm, "bind_tools", None)
+            if callable(bind_tools):
+                return True
+
+            # --- 3. Known provider-specific attributes ---
+            # (extensible registry would be better)
+            provider_flags = [
+                "supports_tool_calling",
+                "tool_calling",
+                "function_calling",  # OpenAI-style naming
+            ]
+
+            for attr in provider_flags:
+                val = getattr(llm, attr, None)
+                if isinstance(val, bool):
+                    return val
+
+            # --- 4. Optional: lightweight behavioral probe ---
+            if hasattr(llm, "invoke"):
+                try:
+                    test_tool = {
+                        "name": "test_tool",
+                        "description": "test",
+                        "parameters": {"type": "object", "properties": {}},
+                    }
+
+                    # Try binding tools (non-invasive)
+                    if callable(bind_tools):
+                        llm_with_tools = bind_tools([test_tool])
+                        return llm_with_tools is not None
+                except Exception as probe_err:
+                    logger.debug(f"Tool probe failed: {probe_err}")
 
             return False
-        except Exception:
+
+        except Exception as e:
+            logger.error(f"Error checking tool support: {e}")
             return False
+
 
     def add_tool(self, tool_func: Callable) -> None:
         """Add a tool to the LLM."""
@@ -122,17 +156,31 @@ class SenecaAgent:
             return
 
         # Wrap the function as a LangChain StructuredTool if it's not already
+        name = getattr(tool_func, "name", tool_func.__name__)
+        
+        # Avoid duplicates
+        for t in self._tools:
+            if t.name == name:
+                return
+
         if not hasattr(tool_func, "name"):
             tool = StructuredTool.from_function(
                 func=tool_func,
-                name=tool_func.__name__,
-                description=tool_func.__doc__ or f"Execute {tool_func.__name__}",
+                name=name,
+                description=tool_func.__doc__ or f"Execute {name}",
             )
         else:
             tool = tool_func
 
         self._tools.append(tool)
         # Re-initialize LLM with new tools on next use
+        self._llm = None
+
+    def remove_tool(self, tool_func: Callable) -> None:
+        """Remove a tool from the LLM."""
+        name = getattr(tool_func, "name", tool_func.__name__)
+        self._tools = [t for t in self._tools if t.name != name]
+        # Re-initialize LLM
         self._llm = None
 
     def stream_reply(

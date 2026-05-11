@@ -164,6 +164,7 @@ class MainWindow(ctk.CTk):
             on_submit=self._on_submit,
             on_cancel=self._on_cancel,
             on_tool_added=self._on_tool_added,
+            on_tool_removed=self._on_tool_removed,
             can_add_tools_func=self._agent.supports_tools,
             placeholder=self._i18n.t("placeholder"),
         )
@@ -194,6 +195,7 @@ class MainWindow(ctk.CTk):
         self._active_conversation = Conversation()
         self._chat.clear()
         self._input.set_thinking(False)
+        self._input.clear_tools()
         self._current_bubble = None
 
     def _on_load_conversation(self, conv: Conversation) -> None:
@@ -209,6 +211,7 @@ class MainWindow(ctk.CTk):
                 bubble = self._chat.add_assistant_bubble()
                 bubble.append_token(msg.content)
         self._input.set_thinking(False)
+        self._input.clear_tools()
         self._current_bubble = None
 
     def _on_submit(self, text: str) -> None:
@@ -237,6 +240,10 @@ class MainWindow(ctk.CTk):
     def _on_tool_added(self, tool_func: Callable) -> None:
         """Called when a tool is selected from the input bar."""
         self._agent.add_tool(tool_func)
+
+    def _on_tool_removed(self, tool_func: Callable) -> None:
+        """Called when a tool is removed from the input bar."""
+        self._agent.remove_tool(tool_func)
 
     def _on_token(self, token: str) -> None:
         """Deliver a streamed token to the UI (called from worker thread)."""
