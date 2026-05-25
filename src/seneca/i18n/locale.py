@@ -9,7 +9,7 @@ declared for future expansion.
 
 from __future__ import annotations
 
-from babel import Locale
+from babel.core import Locale
 
 # Minimal UI string catalogue  {locale_tag: {key: translation}}
 _CATALOGUE: dict[str, dict[str, str]] = {
@@ -21,6 +21,7 @@ _CATALOGUE: dict[str, dict[str, str]] = {
         "mic_unavailable": "Micrófono no disponible",
         "thinking": "Seneca está pensando…",
         "error_prefix": "Error",
+        "thinking_message": "Pensando...",
     },
     "en_US": {
         "app_title": "Seneca AI",
@@ -30,6 +31,7 @@ _CATALOGUE: dict[str, dict[str, str]] = {
         "mic_unavailable": "Microphone not available",
         "thinking": "Seneca is thinking…",
         "error_prefix": "Error",
+        "thinking_message": "Thinking...",
     },
     "fr_FR": {
         "app_title": "Seneca AI",
@@ -39,6 +41,7 @@ _CATALOGUE: dict[str, dict[str, str]] = {
         "mic_unavailable": "Microphone indisponible",
         "thinking": "Seneca réfléchit…",
         "error_prefix": "Erreur",
+        "thinking_message": "Réflexion en cours...",
     },
     "de_DE": {
         "app_title": "Seneca AI",
@@ -48,6 +51,7 @@ _CATALOGUE: dict[str, dict[str, str]] = {
         "mic_unavailable": "Mikrofon nicht verfügbar",
         "thinking": "Seneca denkt nach…",
         "error_prefix": "Fehler",
+        "thinking_message": "Denke nach...",
     },
 }
 

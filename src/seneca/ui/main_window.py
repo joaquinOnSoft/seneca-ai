@@ -51,6 +51,9 @@ from seneca.ui.input_bar import InputBar
 from seneca.ui.sidebar import Sidebar
 from seneca.utils.config import config
 
+# Sentinel value to indicate a bubble is pending creation on the main thread
+_BUBBLE_PENDING = object()
+
 
 class MainWindow(ctk.CTk):
     """
@@ -75,11 +78,18 @@ class MainWindow(ctk.CTk):
         self._history: list[Conversation] = storage.load_conversations(
             config.max_conversations
         )
-        self._current_bubble = None  # AssistantBubble | None
+        self._current_bubble: ChatArea.AssistantBubble | None | object = None  # AssistantBubble | None | _BUBBLE_PENDING
 
         self._setup_window()
         self._build_ui()
-        self._refresh_sidebar_history()
+        # Defer the call to _refresh_sidebar_history to ensure UI is fully built
+        self.after(100, self._refresh_sidebar_history) # Call after 100ms
+
+    def _refresh_sidebar_history(self) -> None:
+        """
+        Actualiza la interfaz de la barra lateral con la lista de conversaciones cargadas.
+        """
+        self._sidebar.update_history(self._history)
 
     # ── Window setup ──────────────────────────────────────────────────────
 
@@ -153,9 +163,9 @@ class MainWindow(ctk.CTk):
         sep.grid(row=0, column=0, sticky="sew")
 
     def _build_chat_area(self) -> None:
-        self._chat = ChatArea(self._main)
+        self._chat = ChatArea(self._main, i18n=self._i18n)
         self._chat.grid(
-            row=1, column=0, sticky="nsew", padx=0, pady=0
+            row=1, column=0, sticky="nsew", padx=0, pady=(0, 12)
         )
 
     def _build_input_bar(self) -> None:
@@ -194,6 +204,7 @@ class MainWindow(ctk.CTk):
         self._agent.reset()
         self._active_conversation = Conversation()
         self._chat.clear()
+        self._chat.hide_thinking_message() # Ensure thinking message is hidden
         self._input.set_thinking(False)
         self._input.clear_tools()
         self._current_bubble = None
@@ -204,12 +215,17 @@ class MainWindow(ctk.CTk):
         self._agent.reset()
         self._active_conversation = conv
         self._chat.clear()
+        self._chat.hide_thinking_message() # Ensure thinking message is hidden
         for msg in conv.messages:
             if msg.role == Role.USER:
                 self._chat.add_user_message(msg.content)
             else:
                 bubble = self._chat.add_assistant_bubble()
                 bubble.append_token(msg.content)
+        
+        # Asegurar que el scroll llegue al final tras cargar el historial
+        self.update()
+        self._chat.scroll_to_bottom()
         self._input.set_thinking(False)
         self._input.clear_tools()
         self._current_bubble = None
@@ -219,10 +235,13 @@ class MainWindow(ctk.CTk):
         # Add user message to data model and UI
         self._active_conversation.add_message(Role.USER, text)
         self._chat.add_user_message(text)
+        self.update()
+        self._chat.scroll_to_bottom()
 
-        # Prepare streaming bubble
-        self._current_bubble = self._chat.add_assistant_bubble()
+        # Show thinking message
+        self._chat.show_thinking_message()
         self._input.set_thinking(True)
+        self._current_bubble = _BUBBLE_PENDING # Indicate bubble creation is pending
 
         # Stream agent reply
         self._agent.stream_reply(
@@ -235,7 +254,9 @@ class MainWindow(ctk.CTk):
     def _on_cancel(self) -> None:
         """User clicked the stop button."""
         self._agent.cancel()
+        self._chat.hide_thinking_message() # Hide thinking message on cancel
         self._input.set_thinking(False)
+        self._current_bubble = None # Reset current bubble on cancel
 
     def _on_tool_added(self, tool_func: Callable) -> None:
         """Called when a tool is selected from the input bar."""
@@ -247,8 +268,20 @@ class MainWindow(ctk.CTk):
 
     def _on_token(self, token: str) -> None:
         """Deliver a streamed token to the UI (called from worker thread)."""
-        if self._current_bubble is not None:
-            self.after(0, lambda t=token: self._current_bubble.append_token(t))
+        # Delegate all logic to the main thread to prevent multiple bubble creation
+        self.after(0, self._process_token_main_thread, token)
+
+    def _process_token_main_thread(self, token: str) -> None:
+        """Handles bubble creation and token appending sequentially on the main thread."""
+        if self._current_bubble is _BUBBLE_PENDING:
+            self._chat.hide_thinking_message()
+            self._current_bubble = self._chat.add_assistant_bubble()
+        
+        if self._current_bubble is not None and self._current_bubble is not _BUBBLE_PENDING:
+            self._current_bubble.append_token(token)
+            # Forzar actualización de geometría y hacer scroll al final
+            self.update()
+            self._chat.scroll_to_bottom()
 
     def _on_done(self, full_reply: str) -> None:
         """Finalise a completed reply."""
@@ -264,18 +297,25 @@ class MainWindow(ctk.CTk):
 
     def _on_error(self, message: str) -> None:
         """Display an error in the current bubble."""
-        if self._current_bubble is not None:
-            self.after(
-                0,
-                lambda m=message: self._current_bubble.set_error(
-                    f"{self._i18n.t('error_prefix')}: {m}"
-                ),
-            )
-        self.after(0, self._finish_thinking)
+        self.after(0, self._handle_error_main_thread, message)
+
+    def _handle_error_main_thread(self, message: str) -> None:
+        """Handles error display sequentially on the main thread."""
+        self._chat.hide_thinking_message()
+        
+        if self._current_bubble is _BUBBLE_PENDING:
+            self._current_bubble = self._chat.add_assistant_bubble()
+            
+        if self._current_bubble is not None and self._current_bubble is not _BUBBLE_PENDING:
+            error_text = f"{self._i18n.t('error_prefix')}: {message}"
+            self._current_bubble.set_error(error_text)
+            self.update()
+            self._chat.scroll_to_bottom()
+            
+        self._finish_thinking()
 
     def _finish_thinking(self) -> None:
+        self._chat.hide_thinking_message() # Ensure thinking message is hidden
         self._input.set_thinking(False)
         self._refresh_sidebar_history()
-
-    def _refresh_sidebar_history(self) -> None:
-        self._sidebar.populate(self._history)
+        self._current_bubble = None # Reset for next interaction

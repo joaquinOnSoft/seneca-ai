@@ -12,16 +12,15 @@ the two icon buttons.
 """
 # src/seneca/ui/input_bar.py
 
+import logging
 import os
 import shutil
 import sys
-import tkinter as tk
 from pathlib import Path
 from typing import Callable
-import logging
 
 import customtkinter as ctk
-from PIL import Image, ImageTk
+from PIL import Image
 
 # Make sure the project root is on sys.path when running from src/
 _ROOT = Path(__file__).parent.parent.parent.parent

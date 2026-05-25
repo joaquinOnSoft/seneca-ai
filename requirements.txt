@@ -13,3 +13,4 @@ pyaudio>=0.2.14
 openai>=1.51.0
 
 pillow
+babel-cli

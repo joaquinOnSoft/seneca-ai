@@ -6,9 +6,13 @@ hamburger icon) and can be expanded to show full menu options.
 """
 
 from __future__ import annotations
+from typing import TYPE_CHECKING
 
 from pathlib import Path
 from typing import Callable
+
+if TYPE_CHECKING:
+     from seneca.core.conversation import Conversation
 
 import customtkinter as ctk
 from PIL import Image
@@ -175,7 +179,8 @@ class Sidebar(ctk.CTkFrame):
         """Return *True* if the sidebar is currently expanded."""
         return self._expanded
 
-    def populate(self, conversations: list[Conversation]) -> None:
+    #def populate(self, conversations: list[Conversation]) -> None:
+    def update_history(self, conversations: list[Conversation]) -> None:
         """
         Re-render the conversation list.
 
