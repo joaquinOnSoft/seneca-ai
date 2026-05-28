@@ -1,0 +1,128 @@
+traduce los comentarios del ficher docker-compose.yaml al ingles# ══════════════════════════════════════════════════════════════
+#  docker-compose.yaml
+#  Services:
+#    · ollama     — local LLM server, port 11434
+#    · audio-stt  — Python + ALSA + JACK + PyAudio
+#
+#  Basic usage (CPU):
+#    docker compose up --build
+#
+#  With NVIDIA GPU:
+#    Uncomment the `deploy` block in the ollama service and
+#    make sure nvidia-container-toolkit is installed on the host.
+# ══════════════════════════════════════════════════════════════
+
+services:
+
+  # ────────────────────────────────────────────────────────────
+  #  ollama — local LLM server
+  # ────────────────────────────────────────────────────────────
+  ollama:
+    build:
+      context: ./ollama
+      dockerfile: Dockerfile
+    container_name: ollama
+    restart: unless-stopped
+
+    environment:
+      # Model the entrypoint will pull on first startup
+      OLLAMA_MODEL: "hadad/LFM2.5-1.2B:Q4_K_M"
+      # Seconds the model stays loaded in memory without requests
+      OLLAMA_KEEP_ALIVE: "300"
+      # 0 = CPU only · -1 = all layers on GPU
+      OLLAMA_NUM_GPU: "0"
+
+    ports:
+      - "11434:11434"
+
+    volumes:
+      # Models persisted on the host — pull is skipped on restarts
+      - ollama_models:/root/.ollama
+
+    networks:
+      - llm_net
+
+    # ── NVIDIA GPU (uncomment to enable) ──────────────────────
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/version"]
+      interval: 20s
+      timeout: 5s
+      start_period: 90s   # allows time for the model pull on first run
+      retries: 5
+
+  # ────────────────────────────────────────────────────────────
+  #  audio-stt — Python with access to host audio hardware
+  # ────────────────────────────────────────────────────────────
+  audio-stt:
+    build:
+      context: ./audio
+      dockerfile: Dockerfile
+    container_name: audio-stt
+    restart: unless-stopped
+
+    environment:
+      # Ollama service URL reachable inside the Docker network
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "hadad/LFM2.5-1.2B:Q4_K_M"
+
+    volumes:
+      # Source code mounted for hot-reload during development (no rebuild needed)
+      - ./app:/app
+      # Host PulseAudio socket (only needed if the host uses PulseAudio)
+      - /run/user/1000/pulse:/run/user/1000/pulse:ro
+
+    devices:
+      # Expose all host ALSA devices to the container
+      - /dev/snd:/dev/snd
+
+    group_add:
+      # Host 'audio' GID must match the one inside the container
+      - audio
+
+    cap_add:
+      # Required for JACK real-time scheduling priority
+      - SYS_NICE
+
+    networks:
+      - llm_net
+
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+    # Replace with your actual entry point script
+    command: ["python3", "/app/main.py"]
+
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import pyaudio; p = pyaudio.PyAudio(); p.terminate()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+# ── Volumes ────────────────────────────────────────────────────
+volumes:
+  ollama_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      # Host path where downloaded models are persisted.
+      # Create it before the first `docker compose up`:
+      #   sudo mkdir -p /opt/senecaai/volumes/ollama
+      #   sudo chown -R $USER:$USER /opt/senecaai
+      device: "${OLLAMA_MODELS_PATH:-/opt/senecaai/volumes/ollama}"
+
+# ── Internal network ───────────────────────────────────────────
+networks:
+  llm_net:
+    driver: bridge

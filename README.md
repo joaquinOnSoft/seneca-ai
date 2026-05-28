@@ -77,6 +77,24 @@ pip install pyaudio
 # Optional – Anthropic backend
 pip install langchain-anthropic
 ```
+#### 2.1 Dependencies in Ubuntu
+
+```bash
+
+#  ALSA (Advanced Linux Sound Architecture) and JACK Audio Connection Kit.
+sudo apt install alsa-utils alsa-oss alsa-tools
+
+# To avoid errors when accessing the sound hardware (such as those you saw earlier),
+# make sure your Linux user is a member of the audio group. 
+sudo usermod -a -G audio $USER
+
+# In Ubuntu, PyAudio requires the PortAudio development headers  
+sudo apt install portaudio19-dev python3-all-dev
+```
+
+#### 2.2 Development tools in Ubuntu
+
+[Antigravity: Download for Linux](https://antigravity.google/download/linux)
 
 ### 3. Configure environment
 

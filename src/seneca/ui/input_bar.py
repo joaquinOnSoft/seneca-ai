@@ -105,6 +105,8 @@ class InputBar(ctk.CTkFrame):
     on_cancel()     – called when the user clicks ■ (stop).
     on_tool_added(tool_func) - called when a tool is selected from the menu.
     on_tool_removed(tool_func) - called when a tool is removed by clicking its button.
+    on_mic_toggle() - called when the mic button is clicked.
+    is_mic_recording_func() - called to check if mic is currently recording.
     """
 
     DEFAULT_ICON_SIZE = 26
@@ -140,6 +142,10 @@ class InputBar(ctk.CTkFrame):
         self._thinking = False
         self._tool_buttons: list[ctk.CTkButton] = []
 
+        # New STT related attributes
+        self._on_mic_toggle: Callable[[], None] | None = None
+        self._is_mic_recording_func: Callable[[], bool] | None = None
+
         self._load_icons()
         self._build()
 
@@ -161,6 +167,11 @@ class InputBar(ctk.CTkFrame):
         self._icon_mic = ctk.CTkImage(
             light_image=Image.open(icons_dir / "micro.png"),
             dark_image=Image.open(icons_dir / "micro-white.png"),
+            size=(self.DEFAULT_ICON_SIZE, self.DEFAULT_ICON_SIZE),
+        )
+        self._icon_mic_recording = ctk.CTkImage( # New icon for recording state
+            light_image=Image.open(icons_dir / "stop.png"), # Reusing stop icon for recording
+            dark_image=Image.open(icons_dir / "stop-white.png"),
             size=(self.DEFAULT_ICON_SIZE, self.DEFAULT_ICON_SIZE),
         )
 
@@ -243,7 +254,7 @@ class InputBar(ctk.CTkFrame):
             fg_color="transparent",
             hover_color=COLOR_BORDER,
             font=ctk.CTkFont(size=16),
-            command=self._on_mic,
+            command=self._on_mic, # This will now call the assigned _on_mic_toggle
         )
         self._mic_btn.pack(side="left", padx=(0, 6))
 
@@ -303,19 +314,28 @@ class InputBar(ctk.CTkFrame):
         self._on_submit(text)
 
     def _on_mic(self) -> None:
-        if not audio.is_available():
-            return
-        self._mic_btn.configure(fg_color=COLOR_ACCENT)
-        audio.listen_once(
-            on_result=self._on_speech_result,
-            on_error=self._on_speech_error,
-        )
+        """Handles the mic button click, delegating to the assigned handler."""
+        if self._on_mic_toggle:
+            self._on_mic_toggle()
+        else:
+            # Fallback to old behavior or show error if no handler is set
+            if not audio.is_available():
+                print("Microphone not available or STT handler not set.")
+                return
+            # Original behavior (Google Web Speech) - keep for now if local STT is not enabled
+            self._mic_btn.configure(fg_color=COLOR_ACCENT)
+            audio.listen_once(
+                on_result=self._on_speech_result,
+                on_error=self._on_speech_error,
+            )
 
     def _on_speech_result(self, text: str) -> None:
+        """Callback for Google Web Speech results (old behavior)."""
         self.after(0, lambda: self._inject_text(text))
         self.after(0, lambda: self._mic_btn.configure(fg_color="transparent"))
 
     def _on_speech_error(self, _msg: str) -> None:
+        """Callback for Google Web Speech errors (old behavior)."""
         self.after(0, lambda: self._mic_btn.configure(fg_color="transparent"))
 
     def _inject_text(self, text: str) -> None:
@@ -379,7 +399,7 @@ class InputBar(ctk.CTkFrame):
                         self._icon_writer,
                         lambda: self._add_tool_ui(
                             "Writer",
-                            self._icon_writer,
+                            self._icon_notepad,
                             text_to_editor.save_and_open_with_swriter,
                         ),
                     )
@@ -467,3 +487,22 @@ class InputBar(ctk.CTkFrame):
         """Update the placeholder string (e.g. for locale changes)."""
         self._placeholder = text
         self._show_placeholder()
+
+    def set_text(self, text: str) -> None:
+        """Set the text in the input bar."""
+        self._inject_text(text)
+
+    def set_on_mic_toggle(self, handler: Callable[[], None]) -> None:
+        """Set the handler for the mic button toggle."""
+        self._on_mic_toggle = handler
+
+    def set_is_mic_recording_func(self, func: Callable[[], bool]) -> None:
+        """Set the function to check if the mic is recording."""
+        self._is_mic_recording_func = func
+
+    def set_mic_recording(self, is_recording: bool) -> None:
+        """Update the mic button's appearance based on recording state."""
+        if is_recording:
+            self._mic_btn.configure(image=self._icon_mic_recording, fg_color=COLOR_STOP)
+        else:
+            self._mic_btn.configure(image=self._icon_mic, fg_color="transparent")

@@ -17,6 +17,10 @@ from dotenv import load_dotenv
 _ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(dotenv_path=_ENV_PATH)
 
+# Allowed values for faster-whisper configuration
+_ALLOWED_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v3"}
+_ALLOWED_COMPUTE_TYPES = {"int8", "float16"}
+
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -55,6 +59,28 @@ class AppConfig:
             os.getenv("MAX_CONVERSATIONS", "20")
         )
     )
+    
+    # Faster-whisper configuration
+    whisper_model_size: str = field(
+        default_factory=lambda: os.getenv("WHISPER_MODEL_SIZE", "small")
+    )
+    whisper_device: str = field(
+        default_factory=lambda: os.getenv("WHISPER_DEVICE", "cpu")
+    )
+    whisper_compute_type: str = field(
+        default_factory=lambda: os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+    )
+
+    def __post_init__(self):
+        # Basic validation for whisper_model_size
+        if self.whisper_model_size not in _ALLOWED_MODEL_SIZES:
+            print(f"Warning: Invalid WHISPER_MODEL_SIZE '{self.whisper_model_size}'. Defaulting to 'small'.")
+            object.__setattr__(self, 'whisper_model_size', 'small')
+        
+        # Basic validation for whisper_compute_type
+        if self.whisper_compute_type not in _ALLOWED_COMPUTE_TYPES:
+            print(f"Warning: Invalid WHISPER_COMPUTE_TYPE '{self.whisper_compute_type}'. Defaulting to 'int8'.")
+            object.__setattr__(self, 'whisper_compute_type', 'int8')
 
 
 # Singleton – import and use directly

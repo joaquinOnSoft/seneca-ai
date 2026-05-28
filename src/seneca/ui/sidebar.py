@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 if TYPE_CHECKING:
      from seneca.core.conversation import Conversation
@@ -74,6 +74,7 @@ class Sidebar(ctk.CTkFrame):
         self._on_select = on_select_conversation
         self._i18n = i18n
         self._expanded = False
+        self._active_conversation_id: Optional[str] = None
         self._conv_buttons: list[ctk.CTkButton] = []
 
         self._load_icons()
@@ -82,11 +83,15 @@ class Sidebar(ctk.CTkFrame):
     def _load_icons(self) -> None:
         """Load icon images for the buttons."""
         icons_dir = _ROOT / "assets" / "icons"
-        self._icon_pencil = ctk.CTkImage(
-            light_image=Image.open(icons_dir / "pencil-black.png"),
-            dark_image=Image.open(icons_dir / "pencil-white.png"),
-            size=(20, 20)
-        )
+        try:
+            self._icon_pencil = ctk.CTkImage(
+                light_image=Image.open(icons_dir / "pencil-black.png"),
+                dark_image=Image.open(icons_dir / "pencil-white.png"),
+                size=(20, 20)
+            )
+        except (FileNotFoundError, IOError):
+            # Fallback if icons are missing
+            self._icon_pencil = None
 
     # ── Construction ──────────────────────────────────────────────────────
 
@@ -179,29 +184,42 @@ class Sidebar(ctk.CTkFrame):
         """Return *True* if the sidebar is currently expanded."""
         return self._expanded
 
-    #def populate(self, conversations: list[Conversation]) -> None:
-    def update_history(self, conversations: list[Conversation]) -> None:
+    def update_history(self, conversations: list[Conversation], active_id: Optional[str] = None) -> None:
         """
         Re-render the conversation list.
 
         Clears any previous buttons and creates one per conversation.
         """
+        self._active_conversation_id = active_id
+        
+        # Clean up existing buttons
         for btn in self._conv_buttons:
             btn.destroy()
         self._conv_buttons.clear()
 
         for conv in conversations:
-            title = conv.derive_title() or conv.title
-            btn = ctk.CTkButton(
-                self._list_frame,
-                text=title,
-                font=ctk.CTkFont(family=FONT_FAMILY, size=FONT_SIZE_SMALL),
-                fg_color="transparent",
-                hover_color=COLOR_BORDER,
-                text_color=COLOR_TEXT_SECONDARY,
-                anchor="w",
-                corner_radius=6,
-                command=lambda c=conv: self._on_select(c),
-            )
-            btn.pack(fill="x", padx=4, pady=2)
-            self._conv_buttons.append(btn)
+            self._create_conversation_button(conv)
+
+    def _create_conversation_button(self, conv: Conversation) -> None:
+        """Helper to create and style a single conversation button."""
+        is_active = str(conv.id) == str(self._active_conversation_id)
+        
+        title = conv.derive_title() or conv.title
+        
+        btn = ctk.CTkButton(
+            self._list_frame,
+            text=title,
+            font=ctk.CTkFont(
+                family=FONT_FAMILY, 
+                size=FONT_SIZE_SMALL,
+                weight="bold" if is_active else "normal"
+            ),
+            fg_color=COLOR_BORDER if is_active else "transparent",
+            hover_color=COLOR_BORDER,
+            text_color=COLOR_TEXT_PRIMARY if is_active else COLOR_TEXT_SECONDARY,
+            anchor="w",
+            corner_radius=6,
+            command=lambda: self._on_select(conv),
+        )
+        btn.pack(fill="x", padx=4, pady=2)
+        self._conv_buttons.append(btn)

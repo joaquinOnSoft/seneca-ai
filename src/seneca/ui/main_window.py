@@ -50,6 +50,7 @@ from seneca.ui.chat_area import ChatArea
 from seneca.ui.input_bar import InputBar
 from seneca.ui.sidebar import Sidebar
 from seneca.utils.config import config
+from seneca.core.stt_service import SpeechToTextService # Import the STT service
 
 # Sentinel value to indicate a bubble is pending creation on the main thread
 _BUBBLE_PENDING = object()
@@ -79,17 +80,44 @@ class MainWindow(ctk.CTk):
             config.max_conversations
         )
         self._current_bubble: ChatArea.AssistantBubble | None | object = None  # AssistantBubble | None | _BUBBLE_PENDING
+        
+        # Initialize SpeechToTextService
+        self._stt_service = SpeechToTextService(
+            on_transcription_complete=self._on_transcription_complete,
+            on_error=self._on_stt_error
+        )
 
         self._setup_window()
         self._build_ui()
         # Defer the call to _refresh_sidebar_history to ensure UI is fully built
         self.after(100, self._refresh_sidebar_history) # Call after 100ms
 
+    # ── Speech-to-Text Callbacks ──────────────────────────────────────────
+
+    def _on_transcription_complete(self, text: str) -> None:
+        """Callback for when STT service completes transcription."""
+        self.after(0, lambda: self._input.set_text(text))
+        self.after(0, lambda: self._input.set_mic_recording(False)) # Reset mic button state
+
+    def _on_stt_error(self, message: str) -> None:
+        """Callback for when STT service encounters an error."""
+        self.after(0, lambda: print(f"STT Error: {message}")) # For now, just print to console
+        self.after(0, lambda: self._input.set_mic_recording(False)) # Reset mic button state
+
+    def _on_mic_toggle(self) -> None:
+        """Handles the mic button toggle event."""
+        if self._stt_service.is_recording():
+            self._stt_service.stop_recording()
+            self._input.set_mic_recording(False)
+        else:
+            self._stt_service.start_recording()
+            self._input.set_mic_recording(True)
+
     def _refresh_sidebar_history(self) -> None:
         """
         Actualiza la interfaz de la barra lateral con la lista de conversaciones cargadas.
         """
-        self._sidebar.update_history(self._history)
+        self._sidebar.populate(self._history)
 
     # ── Window setup ──────────────────────────────────────────────────────
 
@@ -111,6 +139,9 @@ class MainWindow(ctk.CTk):
     def _build_ui(self) -> None:
         self._build_sidebar()
         self._build_main_panel()
+        # Assign mic callbacks after input bar is fully built
+        self._input.set_on_mic_toggle(self._on_mic_toggle)
+        self._input.set_is_mic_recording_func(self._stt_service.is_recording)
 
     def _build_sidebar(self) -> None:
         self._sidebar = Sidebar(
@@ -177,6 +208,7 @@ class MainWindow(ctk.CTk):
             on_tool_removed=self._on_tool_removed,
             can_add_tools_func=self._agent.supports_tools,
             placeholder=self._i18n.t("placeholder"),
+            # on_mic_toggle and is_mic_recording_func will be set after build_input_bar
         )
         self._input.grid(
             row=2,

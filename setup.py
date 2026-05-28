@@ -29,7 +29,9 @@ setup(
         "python-dotenv>=1.0.1",
         "Babel>=2.15.0",
         "SpeechRecognition>=3.10.4",
+        "pyaudio>=0.2.14",
         "openai>=1.51.0",
+        "faster-whisper>=0.12.0",
     ],
     entry_points={
         "console_scripts": [
