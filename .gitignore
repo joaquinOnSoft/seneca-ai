@@ -1,3 +1,15 @@
+# ── Docker ────────────────────────────────────────────────────
+# Models are stored in /opt/senecaai/volumes (outside the repository).
+# If someone accidentally creates a local volumes/ folder, ignore that too.
+volumes/
+ 
+# Local overrides (paths, ports, individual developer credentials)
+docker-compose.override.yaml
+ 
+# Local overrides (paths, ports, individual developer credentials)
+.dockerignore~
+ 
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
