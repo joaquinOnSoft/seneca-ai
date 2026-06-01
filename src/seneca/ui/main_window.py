@@ -117,7 +117,7 @@ class MainWindow(ctk.CTk):
         """
         Actualiza la interfaz de la barra lateral con la lista de conversaciones cargadas.
         """
-        self._sidebar.populate(self._history)
+        self._sidebar.update_history(self._history, self._active_conversation.id)
 
     # ── Window setup ──────────────────────────────────────────────────────
 
@@ -240,6 +240,7 @@ class MainWindow(ctk.CTk):
         self._input.set_thinking(False)
         self._input.clear_tools()
         self._current_bubble = None
+        self._refresh_sidebar_history() # Refresh sidebar to reflect new active conversation
 
     def _on_load_conversation(self, conv: Conversation) -> None:
         """Replay a historical conversation in the chat area."""
@@ -261,6 +262,7 @@ class MainWindow(ctk.CTk):
         self._input.set_thinking(False)
         self._input.clear_tools()
         self._current_bubble = None
+        self._refresh_sidebar_history() # Refresh sidebar to highlight active conversation
 
     def _on_submit(self, text: str) -> None:
         """Handle a new user prompt."""

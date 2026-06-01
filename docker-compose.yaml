@@ -1,4 +1,4 @@
-traduce los comentarios del ficher docker-compose.yaml al ingles# ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 #  docker-compose.yaml
 #  Services:
 #    · ollama     — local LLM server, port 11434
@@ -19,7 +19,7 @@ services:
   # ────────────────────────────────────────────────────────────
   ollama:
     build:
-      context: ./ollama
+      context: ./docker/ollama
       dockerfile: Dockerfile
     container_name: ollama
     restart: unless-stopped
@@ -63,7 +63,7 @@ services:
   # ────────────────────────────────────────────────────────────
   audio-stt:
     build:
-      context: ./audio
+      context: ./docker/audio
       dockerfile: Dockerfile
     container_name: audio-stt
     restart: unless-stopped
@@ -99,7 +99,7 @@ services:
         condition: service_healthy
 
     # Replace with your actual entry point script
-    command: ["python3", "/app/main.py"]
+    # command: ["python3", "/app/main.py"]
 
     healthcheck:
       test: ["CMD", "python3", "-c",

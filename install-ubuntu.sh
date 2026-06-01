@@ -52,9 +52,15 @@ else
     echo "Step 5: Configuring permissions for user $REAL_USER..."
     sudo usermod -aG docker "$REAL_USER"
 
+    newgrp docker
+
     echo "--------------------------------------------------------"
-    echo "Installation completed successfully!"
-    echo "NOTE: To apply group changes and use Docker without 'sudo',"
-    echo "log out and log back in, or run the command: newgrp docker"
+    echo "Docker installation completed successfully!"
     echo "--------------------------------------------------------"
 fi
+
+# 3. Builds, (re)creates, starts, and attaches to containers for the service.
+docker compose up --build
+
+# 4. Run containers in background
+docker compose up -d
