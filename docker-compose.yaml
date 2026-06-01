@@ -63,8 +63,8 @@ services:
   # ────────────────────────────────────────────────────────────
   audio-stt:
     build:
-      context: ./docker/audio
-      dockerfile: Dockerfile
+      context: . # Changed context to project root
+      dockerfile: ./docker/audio/Dockerfile # Specified full path to Dockerfile
     container_name: audio-stt
     restart: unless-stopped
 
@@ -72,10 +72,17 @@ services:
       # Ollama service URL reachable inside the Docker network
       OLLAMA_BASE_URL: "http://ollama:11434"
       OLLAMA_MODEL: "hadad/LFM2.5-1.2B:Q4_K_M"
+      # Pass through whisper config from host .env to container
+      WHISPER_MODEL_SIZE: "${WHISPER_MODEL_SIZE:-tiny}"
+      WHISPER_DEVICE: "${WHISPER_DEVICE:-cpu}"
+      WHISPER_COMPUTE_TYPE: "${WHISPER_COMPUTE_TYPE:-int8}"
+
+    ports:
+      - "1414:1414" # Expose the API port
 
     volumes:
       # Source code mounted for hot-reload during development (no rebuild needed)
-      - ./app:/app
+      - ./src:/app/src
       # Host PulseAudio socket (only needed if the host uses PulseAudio)
       - /run/user/1000/pulse:/run/user/1000/pulse:ro
 
@@ -98,16 +105,12 @@ services:
       ollama:
         condition: service_healthy
 
-    # Replace with your actual entry point script
-    # command: ["python3", "/app/main.py"]
-
     healthcheck:
-      test: ["CMD", "python3", "-c",
-             "import pyaudio; p = pyaudio.PyAudio(); p.terminate()"]
-      interval: 30s
-      timeout: 10s
-      start_period: 15s
-      retries: 3
+      test: ["CMD", "curl", "-sf", "http://localhost:1414/seneca/v1/stt/languages"]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s # Give the Flask app time to start
+      retries: 5
 
 # ── Volumes ────────────────────────────────────────────────────
 volumes:

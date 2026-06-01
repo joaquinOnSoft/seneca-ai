@@ -26,12 +26,16 @@ setup(
         "langchain-ollama>=0.2.0",
         "langchain-community>=0.3.0",
         "langchain-core>=0.3.0",
+        "ollama>=0.3.0", # Added from requirements.txt
         "python-dotenv>=1.0.1",
         "Babel>=2.15.0",
         "SpeechRecognition>=3.10.4",
         "pyaudio>=0.2.14",
         "openai>=1.51.0",
         "faster-whisper>=0.12.0",
+        "Flask>=2.0.0", # Added from requirements.txt
+        "openai-whisper>=20231117", # Added from requirements.txt
+        "Flasgger>=0.9.0", # Added for Swagger documentation
     ],
     entry_points={
         "console_scripts": [

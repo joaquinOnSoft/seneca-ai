@@ -34,12 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python image; just upgrade and install project dependencies.
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-RUN pip install --no-cache-dir \
-    pyaudio \
-    numpy \
-    sounddevice \
-    soundfile \
-    requests
+WORKDIR /app
+
+# Copy requirements.txt and install Python dependencies
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy the application source code
+COPY src /app/src
 
 # ── Default ALSA configuration ─────────────────────────────────
 # Adjust hw:0,0 to match the card number shown by `aplay -l` on the host
@@ -50,8 +52,11 @@ RUN printf 'pcm.!default {\n  type hw\n  card 0\n}\nctl.!default {\n  type hw\n 
 RUN groupadd -r appuser \
     && useradd -r -g appuser -G audio appuser
 
-WORKDIR /app
+# Expose the port the Flask app will run on
+EXPOSE 1414
 
-# Smoke-test: verifies PyAudio imports and detects PortAudio correctly
-CMD ["python3", "-c", \
-     "import pyaudio; p = pyaudio.PyAudio(); print('PyAudio OK —', pyaudio.get_portaudio_version_text()); p.terminate()"]
+# Set the Flask application entry point
+ENV FLASK_APP=src/seneca/api/api.py
+
+# Command to run the Flask application
+CMD ["flask", "run", "--host=0.0.0.0", "--port=1414"]
