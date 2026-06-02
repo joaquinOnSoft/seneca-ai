@@ -38,6 +38,7 @@ setup(
         "Flasgger>=0.9.0",
         "pillow",
         "babel-cli",
+        "python-json-logger",
     ],
     entry_points={
         "console_scripts": [

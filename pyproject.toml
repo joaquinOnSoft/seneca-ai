@@ -27,8 +27,9 @@ dependencies = [
     "Flask>=2.0.0",
     "openai-whisper>=20231117",
     "Flasgger>=0.9.0",
-    "pillow", # Added
-    "babel-cli", # Added
+    "pillow",
+    "babel-cli",
+    "python-json-logger", # Added for structured logging
 ]
 
 [project.optional-dependencies]

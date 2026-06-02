@@ -412,13 +412,6 @@ MOCKED_LANGUAGES = [
   }
 ]
 
-# Mock the FasterWhisper model so it's not actually loaded
-# and to control the return value of transcribe
-# Removed the top-level patch to avoid interference with the fixture.
-# with patch('faster_whisper.WhisperModel') as MockWhisperModel:
-#     mock_instance = MockWhisperModel.return_value
-#     mock_instance.transcribe.return_value = ([MagicMock(text="Mocked transcription")], MagicMock(language="en", language_probability=1.0))
-
 @pytest.fixture
 def client():
     """Configures the test client for the Flask application."""
@@ -514,8 +507,8 @@ def test_stt_model_not_loaded(client):
 def test_stt_transcription_error(client, mock_whisper_model_fixture, mock_tempfile_fixture):
     """Tests the case where faster-whisper transcription fails."""
     # The actual error message from faster-whisper when given invalid audio data
-    expected_error_message = "[Errno 1094995529] Invalid data found when processing input: '/tmp/mock_audio_file.mp3'"
-    mock_whisper_model_fixture.transcribe.side_effect = Exception(expected_error_message)
+    expected_error_message = "An internal server error occurred during transcription."
+    mock_whisper_model_fixture.transcribe.side_effect = Exception("Whisper internal error") # The actual exception can be anything
     mock_file_obj, mock_os_remove = mock_tempfile_fixture
     dummy_mp3_content = b"fake mp3 audio data"
     data = {
@@ -541,3 +534,19 @@ def test_get_supported_languages(client):
         data = json.loads(response.data)
         assert isinstance(data, list)
         assert data == MOCKED_LANGUAGES
+
+# --- Tests for /seneca/v1/health ---
+
+def test_health_check_model_loaded(client, mock_whisper_model_fixture):
+    """Tests the health check endpoint when the Faster-Whisper model is loaded."""
+    # mock_whisper_model_fixture ensures api.model is not None
+    response = client.get('/seneca/v1/health')
+    assert response.status_code == 200
+    assert json.loads(response.data) == {"status": "ok", "model_status": "loaded"}
+
+def test_health_check_model_not_loaded(client):
+    """Tests the health check endpoint when the Faster-Whisper model is not loaded."""
+    with patch('src.seneca.api.api.model', None):
+        response = client.get('/seneca/v1/health')
+        assert response.status_code == 503
+        assert json.loads(response.data) == {"status": "degraded", "model_status": "not loaded"}
