@@ -1,11 +1,13 @@
-import os
-from flask import Flask, request, jsonify
-import tempfile
 import logging
+import os
+import tempfile
+
+import whisper  # Import the original whisper library to access LANGUAGES
 from faster_whisper import WhisperModel
-import whisper # Import the original whisper library to access LANGUAGES
-from seneca.utils.config import config # Import the global config object
-from flasgger import Swagger # Import Swagger
+from flasgger import Swagger  # Import Swagger
+from flask import Flask, request, jsonify
+
+from seneca.utils.config import config  # Import the global config object
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -89,6 +91,14 @@ def stt():
     if audio_file.filename == '':
         api.logger.error("No selected file in the request.")
         return jsonify({"error": "No selected file"}), 400
+
+    # Check if the file is empty
+    audio_file.seek(0, os.SEEK_END)
+    file_size = audio_file.tell()
+    audio_file.seek(0) # Reset file pointer to the beginning
+    if file_size == 0:
+        api.logger.error("Received an empty audio file.")
+        return jsonify({"error": "Empty audio file"}), 400
 
     api.logger.info(f"Input file name: {audio_file.filename}")
 

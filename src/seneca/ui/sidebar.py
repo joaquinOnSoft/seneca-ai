@@ -6,10 +6,10 @@ hamburger icon) and can be expanded to show full menu options.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING
 
 from pathlib import Path
 from typing import Callable, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
      from seneca.core.conversation import Conversation

@@ -1,12 +1,12 @@
-import threading
 import queue
-import pyaudio
+import threading
+
 import numpy as np
+import pyaudio
 from faster_whisper import WhisperModel
-import time
-import collections
 
 from seneca.utils.config import config
+
 
 class SpeechToTextService:
     def __init__(self, on_transcription_complete: callable, on_error: callable):

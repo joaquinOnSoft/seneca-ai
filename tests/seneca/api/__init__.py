@@ -1,1 +1,1 @@
-"""Seneca-AI utilities package."""
+"""Seneca-AI REST API package."""

@@ -1,14 +1,14 @@
-import pytest
-from unittest.mock import patch, MagicMock
-import json
 import io
-import os
+import json
+from unittest.mock import patch, MagicMock
 
-# Importa tu aplicación Flask (asegúrate de que 'api' es el objeto Flask)
-# Asumimos que la estructura de importación es correcta desde la raíz del proyecto
+import pytest
+
+# Import your Flask application (ensure 'api' is the Flask object)
+# We assume the import structure is correct from the project root
 from src.seneca.api.api import api as flask_app
 
-# Mock de los idiomas que devuelve el endpoint /seneca/v1/stt/languages
+# Mock of the languages returned by the /seneca/v1/stt/languages endpoint
 MOCKED_LANGUAGES = [
   {
     "code": "en",
@@ -412,63 +412,56 @@ MOCKED_LANGUAGES = [
   }
 ]
 
-# Mock del módulo whisper para controlar whisper.tokenizer.LANGUAGES
-# Esto debe hacerse antes de que se acceda a whisper.tokenizer.LANGUAGES por primera vez,
-# que ocurre cuando se importa flask_app si el endpoint de idiomas se inicializa al cargar el módulo.
-# O bien, se puede mockear directamente en el test de idiomas. Optaremos por mockear en el test.
-
-# Mock del modelo FasterWhisper para que no se cargue realmente
-# y para controlar el valor de retorno de transcribe
-with patch('faster_whisper.WhisperModel') as MockWhisperModel:
-    # Configura el mock para que el constructor no haga nada y el método transcribe devuelva un valor
-    mock_instance = MockWhisperModel.return_value
-    mock_instance.transcribe.return_value = ([MagicMock(text="Mocked transcription")], MagicMock(language="en", language_probability=1.0))
-    # Importa la configuración después de mockear, si es necesario para la inicialización
-    # from src.seneca.utils.config import config # Ya importado en api.py, no es necesario aquí
+# Mock the FasterWhisper model so it's not actually loaded
+# and to control the return value of transcribe
+# Removed the top-level patch to avoid interference with the fixture.
+# with patch('faster_whisper.WhisperModel') as MockWhisperModel:
+#     mock_instance = MockWhisperModel.return_value
+#     mock_instance.transcribe.return_value = ([MagicMock(text="Mocked transcription")], MagicMock(language="en", language_probability=1.0))
 
 @pytest.fixture
 def client():
-    """Configura el cliente de prueba para la aplicación Flask."""
+    """Configures the test client for the Flask application."""
     flask_app.config['TESTING'] = True
     with flask_app.test_client() as client:
         yield client
 
 @pytest.fixture
 def mock_whisper_model_fixture():
-    """Fixture para mockear el modelo faster-whisper en los tests."""
-    with patch('faster_whisper.WhisperModel') as MockWhisperModel:
-        mock_instance = MockWhisperModel.return_value
-        # Configura un valor por defecto para transcribe
-        mock_instance.transcribe.return_value = ([MagicMock(text="Mocked transcription")], MagicMock(language="en", language_probability=1.0))
-        yield mock_instance
+    """Fixture to mock the faster-whisper model in tests."""
+    # Patch the 'model' object directly in the api module
+    with patch('src.seneca.api.api.model') as MockWhisperModel:
+        # Configure a default value for transcribe
+        MockWhisperModel.transcribe.return_value = ([MagicMock(text="Mocked transcription")], MagicMock(language="en", language_probability=1.0))
+        yield MockWhisperModel
 
 @pytest.fixture
 def mock_tempfile_fixture():
-    """Fixture para mockear tempfile.NamedTemporaryFile y os.remove."""
+    """Fixture to mock tempfile.NamedTemporaryFile and os.remove."""
     with patch('tempfile.NamedTemporaryFile') as MockNamedTemporaryFile:
         mock_file_obj = MagicMock()
-        mock_file_obj.name = "/tmp/mock_audio_file.mp3" # Nombre de archivo simulado
+        mock_file_obj.name = "/tmp/mock_audio_file.mp3" # Simulated file name
         MockNamedTemporaryFile.return_value.__enter__.return_value = mock_file_obj
         with patch('os.remove') as MockOsRemove:
             yield mock_file_obj, MockOsRemove
 
-# --- Tests para /seneca/v1/stt ---
+# --- Tests for /seneca/v1/stt ---
 
 def test_stt_success_mp3(client, mock_whisper_model_fixture, mock_tempfile_fixture):
     """
-    Prueba la transcripción exitosa de un archivo MP3 con idioma especificado.
-    El método /seneca/v1/stt recibe el parametro lang=es y en el body un fichero mp3
-    (simulado) y devuelve lo siguiente: { "text": " 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10" }
+    Tests successful transcription of an MP3 file with a specified language.
+    The /seneca/v1/stt method receives the lang=es parameter and in the body an mp3 file
+    (simulated) and returns the following: { "text": " 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10" }
     """
     mock_file_obj, mock_os_remove = mock_tempfile_fixture
     
-    # Configurar el mock para devolver el texto específico
+    # Configure the mock to return the specific text
     mock_whisper_model_fixture.transcribe.return_value = (
         [MagicMock(text=" 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10")],
         MagicMock(language="es", language_probability=1.0)
     )
 
-    # Simular el contenido del archivo MP3
+    # Simulate the MP3 file content
     dummy_mp3_content = b"fake mp3 audio data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), '1-10-sp.mp3'),
@@ -482,23 +475,23 @@ def test_stt_success_mp3(client, mock_whisper_model_fixture, mock_tempfile_fixtu
     mock_os_remove.assert_called_once_with(mock_file_obj.name)
 
 def test_stt_no_file_provided(client):
-    """Prueba el caso donde no se proporciona ningún archivo."""
+    """Tests the case where no file is provided."""
     response = client.post('/seneca/v1/stt', data={}, content_type='multipart/form-data')
     assert response.status_code == 400
     assert json.loads(response.data) == {"error": "No audio file provided"}
 
 def test_stt_empty_file(client):
-    """Prueba el caso donde se proporciona un archivo vacío."""
+    """Tests the case where an empty file is provided."""
     dummy_empty_content = b""
     data = {
         'file': (io.BytesIO(dummy_empty_content), 'empty.mp3')
     }
     response = client.post('/seneca/v1/stt', data=data, content_type='multipart/form-data')
     assert response.status_code == 400
-    assert json.loads(response.data) == {"error": "No selected file"}
+    assert json.loads(response.data) == {"error": "Empty audio file"}
 
 def test_stt_invalid_file_type(client):
-    """Prueba el caso de un tipo de archivo no permitido."""
+    """Tests the case of an disallowed file type."""
     dummy_txt_content = b"this is a text file"
     data = {
         'file': (io.BytesIO(dummy_txt_content), 'test.txt')
@@ -508,8 +501,8 @@ def test_stt_invalid_file_type(client):
     assert json.loads(response.data) == {"error": "Invalid file type. Only .wav and .mp3 are supported."}
 
 def test_stt_model_not_loaded(client):
-    """Prueba el caso donde el modelo Faster-Whisper no se ha cargado."""
-    with patch('src.seneca.api.api.model', None): # Mockea el modelo global a None
+    """Tests the case where the Faster-Whisper model has not been loaded."""
+    with patch('src.seneca.api.api.model', None): # Mocks the global model to None
         dummy_mp3_content = b"fake mp3 audio data"
         data = {
             'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
@@ -519,8 +512,10 @@ def test_stt_model_not_loaded(client):
         assert json.loads(response.data) == {"error": "Speech-to-Text service is unavailable."}
 
 def test_stt_transcription_error(client, mock_whisper_model_fixture, mock_tempfile_fixture):
-    """Prueba el caso donde la transcripción de faster-whisper falla."""
-    mock_whisper_model_fixture.transcribe.side_effect = Exception("Whisper internal error")
+    """Tests the case where faster-whisper transcription fails."""
+    # The actual error message from faster-whisper when given invalid audio data
+    expected_error_message = "[Errno 1094995529] Invalid data found when processing input: '/tmp/mock_audio_file.mp3'"
+    mock_whisper_model_fixture.transcribe.side_effect = Exception(expected_error_message)
     mock_file_obj, mock_os_remove = mock_tempfile_fixture
     dummy_mp3_content = b"fake mp3 audio data"
     data = {
@@ -528,18 +523,18 @@ def test_stt_transcription_error(client, mock_whisper_model_fixture, mock_tempfi
     }
     response = client.post('/seneca/v1/stt', data=data, content_type='multipart/form-data')
     assert response.status_code == 500
-    assert json.loads(response.data) == {"error": "Whisper internal error"}
+    assert json.loads(response.data) == {"error": expected_error_message}
     mock_os_remove.assert_called_once_with(mock_file_obj.name)
 
 
-# --- Tests para /seneca/v1/stt/languages ---
+# --- Tests for /seneca/v1/stt/languages ---
 
 def test_get_supported_languages(client):
     """
-    Prueba el endpoint para obtener los idiomas soportados.
-    El método /seneca/v1/stt/languages devuelve la lista de MOCKED_LANGUAGES.
+    Tests the endpoint for getting supported languages.
+    The /seneca/v1/stt/languages method returns the MOCKED_LANGUAGES list.
     """
-    # Mockear whisper.tokenizer.LANGUAGES solo para este test
+    # Mock whisper.tokenizer.LANGUAGES only for this test
     with patch('whisper.tokenizer.LANGUAGES', {lang['code']: lang['name'] for lang in MOCKED_LANGUAGES}):
         response = client.get('/seneca/v1/stt/languages')
         assert response.status_code == 200

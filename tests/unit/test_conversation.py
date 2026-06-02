@@ -7,7 +7,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
-import pytest
 from seneca.core.conversation import Conversation, Message, Role
 
 
