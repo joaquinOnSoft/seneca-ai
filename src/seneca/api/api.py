@@ -93,6 +93,38 @@ def after_request_func(response):
 
 @api.route('/seneca/v1/stt', methods=['POST'])
 def stt():
+    """
+    Speech-to-Text (STT) Endpoint
+    This endpoint receives an audio file and transcribes it into text using Faster-Whisper.
+    ---
+    parameters:
+      - name: file
+        in: formData
+        type: file
+        required: true
+        description: The audio file to transcribe (WAV or MP3 format).
+      - name: lang
+        in: formData
+        type: string
+        required: false
+        default: en
+        description: The language of the audio. e.g., 'en', 'es', 'fr'.
+    responses:
+      200:
+        description: Successfully transcribed text.
+        schema:
+          type: object
+          properties:
+            text:
+              type: string
+              description: The transcribed text.
+      400:
+        description: Bad request, e.g., no file provided, empty file, or unsupported file type.
+      503:
+        description: Service unavailable, Faster-Whisper model not loaded.
+      500:
+        description: Internal server error during transcription.
+    """
     api.logger.info("STT request received.")
 
     if model is None:
@@ -155,12 +187,59 @@ def stt():
 
 @api.route('/seneca/v1/stt/languages', methods=['GET'])
 def get_supported_languages():
+    """
+    Get Supported STT Languages
+    Returns a list of languages supported by the Speech-to-Text service.
+    ---
+    responses:
+      200:
+        description: A list of supported languages.
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                description: The language code (e.g., 'en', 'es').
+              name:
+                type: string
+                description: The full name of the language (e.g., 'English', 'Spanish').
+    """
     api.logger.info("Request received for supported STT languages.")
     supported_languages = [{"code": code, "name": name} for code, name in whisper.tokenizer.LANGUAGES.items()]
     return jsonify(supported_languages), 200
 
 @api.route('/seneca/v1/health', methods=['GET'])
 def health_check():
+    """
+    Health Check Endpoint
+    Checks the health of the API and the Faster-Whisper model.
+    ---
+    responses:
+      200:
+        description: API is healthy and model is loaded.
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [ok]
+            model_status:
+              type: string
+              enum: [loaded]
+      503:
+        description: API is degraded, Faster-Whisper model is not loaded.
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [degraded]
+            model_status:
+              type: string
+              enum: [not loaded]
+    """
     api.logger.info("Health check request received.")
     if model is not None:
         return jsonify({"status": "ok", "model_status": "loaded"}), 200
@@ -169,4 +248,5 @@ def health_check():
         return jsonify({"status": "degraded", "model_status": "not loaded"}), 503
 
 if __name__ == '__main__':
-    api.run(debug=True)
+    from waitress import serve
+    serve(api, host="0.0.0.0", port=1414)

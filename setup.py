@@ -39,6 +39,7 @@ setup(
         "pillow",
         "babel-cli",
         "python-json-logger",
+        "waitress",
     ],
     entry_points={
         "console_scripts": [

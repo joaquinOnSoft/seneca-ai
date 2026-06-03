@@ -18,3 +18,4 @@ Flasgger>=0.9.0
 pillow
 babel-cli
 python-json-logger
+waitress

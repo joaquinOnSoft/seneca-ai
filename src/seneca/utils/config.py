@@ -70,6 +70,11 @@ class AppConfig:
     whisper_compute_type: str = field(
         default_factory=lambda: os.getenv("WHISPER_COMPUTE_TYPE", "int8")
     )
+    # Hugging Face token.
+    # Please set an HF_TOKEN to enable higher rate limits and faster downloads.
+    hf_token: str = field(
+        default_factory=lambda: os.getenv("HF_TOKEN", "")
+    )
 
     def __post_init__(self):
         # Basic validation for whisper_model_size

@@ -30,6 +30,7 @@ dependencies = [
     "pillow",
     "babel-cli",
     "python-json-logger", # Added for structured logging
+    "waitress",
 ]
 
 [project.optional-dependencies]
