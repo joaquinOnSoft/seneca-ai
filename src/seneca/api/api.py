@@ -78,6 +78,7 @@ logging.getLogger().setLevel(logging.INFO)
 
 # --- Swagger Configuration ---
 swagger_config = {
+    "swagger": "2.0", # Added Swagger version
     "headers": [
     ],
     "specs": [
