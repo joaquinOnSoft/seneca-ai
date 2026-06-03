@@ -76,14 +76,70 @@ api.logger.setLevel(logging.INFO)
 logging.getLogger().addFilter(RequestIdFilter())
 logging.getLogger().setLevel(logging.INFO)
 
-Swagger(api)
+# --- Swagger Configuration ---
+swagger_config = {
+    "headers": [
+    ],
+    "specs": [
+        {
+            "endpoint": 'apispec_1',
+            "route": '/apispec_1.json',
+            "rule_filter": lambda rule: True,  # all in
+            "model_filter": lambda tag: True,  # all in
+        }
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/apidocs",
+    "securityDefinitions": {
+        "APIKeyHeader": {
+            "type": "apiKey",
+            "name": "X-SENECA-AI-API-KEY",
+            "in": "header",
+            "description": "API Key required for authentication"
+        }
+    },
+    "security": [
+        {"APIKeyHeader": []}
+    ]
+}
 
-# --- Request Hooks for Correlation ID ---
+Swagger(api, config=swagger_config)
+
+
+# --- API Key Validation ---
+def validate_api_key():
+    # Exclude health check and Swagger UI paths from API key validation
+    if request.path == '/seneca/v1/health' or request.path == '/apidocs' or request.path.startswith('/flasgger_static'):
+        return None # No API key needed for these paths
+
+    api_key = request.headers.get('X-SENECA-AI-API-KEY')
+    if not api_key:
+        api.logger.warning("API Key missing in request header.", extra={'event': 'auth_failed', 'reason': 'missing_key'})
+        return jsonify({"error": "Unauthorized: API Key missing"}), 401
+    
+    if not config.seneca_ai_api_key:
+        api.logger.error("SENECA_AI_API_KEY is not configured in the application.", exc_info=True, extra={'event': 'auth_error'})
+        return jsonify({"error": "Server configuration error: API Key not set"}), 500
+
+    if api_key != config.seneca_ai_api_key:
+        api.logger.warning("Invalid API Key provided.", extra={'event': 'auth_failed', 'reason': 'invalid_key'})
+        return jsonify({"error": "Unauthorized: Invalid API Key"}), 401
+    
+    return None # Validation successful
+
+# --- Request Hooks for Correlation ID and API Key Validation ---
 @api.before_request
 def before_request_func():
+    # Correlation ID handling
     correlation_id = request.headers.get('X-Correlation-ID', str(uuid.uuid4()))
     g.correlation_id = correlation_id
     api.logger.info(f"Request started: {request.method} {request.path}", extra={'event': 'request_start', 'method': request.method, 'path': request.path})
+
+    # API Key validation
+    validation_response = validate_api_key()
+    if validation_response:
+        return validation_response # If validation fails, return the error response
 
 @api.after_request
 def after_request_func(response):
@@ -109,6 +165,8 @@ def stt():
         required: false
         default: en
         description: The language of the audio. e.g., 'en', 'es', 'fr'.
+    security:
+      - APIKeyHeader: []
     responses:
       200:
         description: Successfully transcribed text.
@@ -120,6 +178,8 @@ def stt():
               description: The transcribed text.
       400:
         description: Bad request, e.g., no file provided, empty file, or unsupported file type.
+      401:
+        description: Unauthorized: API Key missing or invalid.
       503:
         description: Service unavailable, Faster-Whisper model not loaded.
       500:
@@ -191,6 +251,8 @@ def get_supported_languages():
     Get Supported STT Languages
     Returns a list of languages supported by the Speech-to-Text service.
     ---
+    security:
+      - APIKeyHeader: []
     responses:
       200:
         description: A list of supported languages.
@@ -205,6 +267,8 @@ def get_supported_languages():
               name:
                 type: string
                 description: The full name of the language (e.g., 'English', 'Spanish').
+      401:
+        description: Unauthorized: API Key missing or invalid.
     """
     api.logger.info("Request received for supported STT languages.")
     supported_languages = [{"code": code, "name": name} for code, name in whisper.tokenizer.LANGUAGES.items()]

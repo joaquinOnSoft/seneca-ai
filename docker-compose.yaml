@@ -76,6 +76,8 @@ services:
       WHISPER_MODEL_SIZE: "${WHISPER_MODEL_SIZE:-tiny}"
       WHISPER_DEVICE: "${WHISPER_DEVICE:-cpu}"
       WHISPER_COMPUTE_TYPE: "${WHISPER_COMPUTE_TYPE:-int8}"
+      # Define the path to the API key file within the container
+      SENECA_AI_API_KEY_FILE: "/run/secrets/seneca_ai_api_key_secret" # Corregido para apuntar a la ubicación por defecto de Docker Secrets
 
     ports:
       - "1414:1414" # Expose the API port
@@ -106,11 +108,13 @@ services:
         condition: service_healthy
 
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:1414/seneca/v1/stt/languages"]
+      test: ["CMD", "curl", "-sf", "http://localhost:1414/seneca/v1/health"] # Cambiado a /seneca/v1/health
       interval: 20s
       timeout: 5s
       start_period: 15s # Give the Flask app time to start
       retries: 5
+    secrets:
+      - seneca_ai_api_key_secret
 
 # ── Volumes ────────────────────────────────────────────────────
 volumes:
@@ -129,3 +133,8 @@ volumes:
 networks:
   llm_net:
     driver: bridge
+
+# ── Secrets ────────────────────────────────────────────────────
+secrets:
+  seneca_ai_api_key_secret:
+    file: docker/audio/seneca_ai_api_key.txt

@@ -76,6 +76,14 @@ class AppConfig:
         default_factory=lambda: os.getenv("HF_TOKEN", "")
     )
 
+    # Seneca AI API Key for authentication
+    seneca_ai_api_key: str = field(
+        default_factory=lambda: os.getenv("SENECA_AI_API_KEY", "")
+    )
+    seneca_ai_api_key_file: str = field(
+        default_factory=lambda: os.getenv("SENECA_AI_API_KEY_FILE", "")
+    )
+
     def __post_init__(self):
         # Basic validation for whisper_model_size
         if self.whisper_model_size not in _ALLOWED_MODEL_SIZES:
@@ -86,6 +94,16 @@ class AppConfig:
         if self.whisper_compute_type not in _ALLOWED_COMPUTE_TYPES:
             print(f"Warning: Invalid WHISPER_COMPUTE_TYPE '{self.whisper_compute_type}'. Defaulting to 'int8'.")
             object.__setattr__(self, 'whisper_compute_type', 'int8')
+
+        # Read SENECA_AI_API_KEY from file if SENECA_AI_API_KEY_FILE is provided
+        if self.seneca_ai_api_key_file and os.path.exists(self.seneca_ai_api_key_file):
+            try:
+                with open(self.seneca_ai_api_key_file, 'r') as f:
+                    secret_value = f.read().strip()
+                    object.__setattr__(self, 'seneca_ai_api_key', secret_value)
+                print(f"Info: SENECA_AI_API_KEY loaded from file: {self.seneca_ai_api_key_file}")
+            except Exception as e:
+                print(f"Warning: Could not read SENECA_AI_API_KEY from file {self.seneca_ai_api_key_file}. Error: {e}")
 
 
 # Singleton – import and use directly
