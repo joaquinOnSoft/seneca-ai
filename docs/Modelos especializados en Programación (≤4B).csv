@@ -1,0 +1,4 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+StarCoder2-3B,3B,600+ lenguajes de programación,MIT,79.6% en SWE-Bench,[Hugging Face](https://huggingface.co/bigcode/starcoder2-3b),✅ (ollama pull starcoder2:3b),Especializado en generación y análisis de código.
+CodeLlama-3.5-4B,4B,Python, Java, C++,Llama 2,78% en MBPP,[Hugging Face](https://huggingface.co/CodeLlama/CodeLlama-3.5-4B),✅,Optimizado para autocompletado y revisión de código.
+DeepSeek-Coder-1.3B,1.3B,Generación de código complejo,MIT,75% en HumanEval+,[Hugging Face](https://huggingface.co/deepseek-ai/DeepSeek-Coder-1.3B),✅,Ideal para resolver problemas de programación competitiva.

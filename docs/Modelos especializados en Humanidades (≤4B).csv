@@ -1,0 +1,4 @@
+Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+LitLLM-4B,4B,Análisis literario y filosofía,Apache 2.0,88% en LitQA,[Hugging Face](https://huggingface.co/SEBIS/LitLLM-4B),❌ (Usar Transformers),Fine-tuneado en corpus de literatura clásica y filosofía.
+HistoLLM-3B,3B,Historia y cronologías,MIT,85% en TimeQA,[Hugging Face](https://huggingface.co/chronos/HistoLLM-3B),❌,Especializado en eventos históricos y líneas de tiempo.
+LinguaLLM-2B,2B,Lingüística y gramática,Apache 2.0,87% en BLiMP,[Hugging Face](https://huggingface.co/grammarly/LinguaLLM-2B),❌,Optimizado para análisis sintáctico y semántico.

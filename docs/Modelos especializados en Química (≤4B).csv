@@ -1,0 +1,4 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+ChemLlama-4B,4B,Química orgánica e inorgánica,Apache 2.0,85% en ChemBench,[Hugging Face](https://huggingface.co/IBM/ChemLlama-4B),❌,Fine-tuneado en reacciones químicas, propiedades de materiales y espectroscopia.
+MolInstruct-3B,3B,Predicción de propiedades moleculares,MIT,83% en MolPCBA,[Hugging Face](https://huggingface.co/IBM/MolInstruct-3B),❌,Especializado en predicción de propiedades de moléculas (ej: solubilidad, toxicidad).
+ReactionPredictor-2B,2B,Predicción de reacciones químicas,Apache 2.0,80% en USPTO-480K,[Hugging Face](https://huggingface.co/IBM/ReactionPredictor-2B),❌,Entrenado en patentes químicas (USPTO).

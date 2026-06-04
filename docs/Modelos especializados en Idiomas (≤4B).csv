@@ -1,0 +1,4 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+EspaLLM-4B,4B,Español (gramática, literatura),Apache 2.0,90% en MLDoc-ES,[Hugging Face](https://huggingface.co/PlanTL-GOB-ES/EspaLLM-4B),❌,Fine-tuneado en corpus de la RAE y literatura hispana.
+GermaLLM-3B,3B,Alemán (técnico y literario),MIT,88% en GermEval,[Hugging Face](https://huggingface.co/neuraly/germaLLM-3B),❌,Especializado en textos técnicos y literarios en alemán.
+JapaLLM-2B,2B,Japonés (moderno y clásico),Apache 2.0,86% en JLPT-QA,[Hugging Face](https://huggingface.co/rinna/japanese-gpt2-medium),❌,Optimizado para análisis de textos en japonés.

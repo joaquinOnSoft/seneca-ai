@@ -1,0 +1,4 @@
+Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas,
+Meditron-4B,4B,Diagnóstico médico y clínica,Apache 2.0,82% en MedQA,[Hugging Face](https://huggingface.co/meditron/meditron-4b),✅ (ollama pull meditron-4b),Fine-tuneado en PubMed, casos clínicos y guías médicas.
+BioBERT-4B,4B,Bioinformática y secuencias,Apache 2.0,80% en BioASQ,[Hugging Face](https://huggingface.co/dmis-lab/biobert-v1.1-4b),❌,Especializado en análisis de secuencias de ADN/ARN y proteínas.,
+ClinicalCamel-3B,3B,Informes médicos y terminología,MIT,84% en MedMCQA,[Hugging Face](https://huggingface.co/cambridgeltl/ClinicalCamel-3B),❌,Entrenado en notas clínicas y terminología médica (SNOMED-CT).,
