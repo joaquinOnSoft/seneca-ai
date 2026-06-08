@@ -476,7 +476,7 @@ def test_stt_success_mp3(client, mock_whisper_model_fixture, mock_tempfile_fixtu
     )
 
     # Simulate the MP3 file content
-    dummy_mp3_content = b"fake mp3 audio data"
+    dummy_mp3_content = b"fake mp3 api data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), '1-10-sp.mp3'),
         'lang': 'es'
@@ -495,7 +495,7 @@ def test_stt_no_file_provided(client):
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
     response = client.post('/seneca/v1/stt', data={}, content_type='multipart/form-data', headers=headers)
     assert response.status_code == 400  # Now it should pass auth and fail on no file
-    assert json.loads(response.data) == {"error": "No audio file provided"}
+    assert json.loads(response.data) == {"error": "No api file provided"}
 
 
 def test_stt_empty_file(client):
@@ -507,7 +507,7 @@ def test_stt_empty_file(client):
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
     response = client.post('/seneca/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
     assert response.status_code == 400
-    assert json.loads(response.data) == {"error": "Empty audio file"}
+    assert json.loads(response.data) == {"error": "Empty api file"}
 
 
 def test_stt_invalid_file_type(client):
@@ -525,7 +525,7 @@ def test_stt_invalid_file_type(client):
 def test_stt_model_not_loaded(client):
     """Tests the case where the Faster-Whisper model has not been loaded."""
     with patch('src.seneca.api.api.model', None):  # Mocks the global model to None
-        dummy_mp3_content = b"fake mp3 audio data"
+        dummy_mp3_content = b"fake mp3 api data"
         data = {
             'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
         }
@@ -537,12 +537,12 @@ def test_stt_model_not_loaded(client):
 
 def test_stt_transcription_error(client, mock_whisper_model_fixture, mock_tempfile_fixture):
     """Tests the case where faster-whisper transcription fails."""
-    # The actual error message from faster-whisper when given invalid audio data
+    # The actual error message from faster-whisper when given invalid api data
     expected_error_message = "An internal server error occurred during transcription."
     mock_whisper_model_fixture.transcribe.side_effect = Exception(
         "Whisper internal error")  # The actual exception can be anything
     mock_file_obj, mock_os_remove = mock_tempfile_fixture
-    dummy_mp3_content = b"fake mp3 audio data"
+    dummy_mp3_content = b"fake mp3 api data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }
@@ -557,7 +557,7 @@ def test_stt_transcription_error(client, mock_whisper_model_fixture, mock_tempfi
 
 def test_stt_missing_api_key(client):
     """Tests that STT endpoint returns 401 if no API key is provided."""
-    dummy_mp3_content = b"fake mp3 audio data"
+    dummy_mp3_content = b"fake mp3 api data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }
@@ -568,7 +568,7 @@ def test_stt_missing_api_key(client):
 
 def test_stt_invalid_api_key(client):
     """Tests that STT endpoint returns 401 if an invalid API key is provided."""
-    dummy_mp3_content = b"fake mp3 audio data"
+    dummy_mp3_content = b"fake mp3 api data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }

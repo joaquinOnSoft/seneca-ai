@@ -1,5 +1,5 @@
 """
-src/seneca/utils/audio.py – Microphone / speech-to-text utilities.
+src/seneca/utils/api.py – Microphone / speech-to-text utilities.
 
 Uses the SpeechRecognition library with Google Web Speech as the
 default backend.  The heavy lifting runs in a daemon thread so the
@@ -49,7 +49,7 @@ def listen_once(
         except sr.WaitTimeoutError:
             on_error("No speech detected. Please try again.")
         except sr.UnknownValueError:
-            on_error("Could not understand audio. Please try again.")
+            on_error("Could not understand api. Please try again.")
         except sr.RequestError as exc:
             on_error(f"Speech service error: {exc}")
         except OSError as exc:

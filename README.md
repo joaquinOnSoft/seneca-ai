@@ -85,8 +85,8 @@ pip install langchain-anthropic
 sudo apt install alsa-utils alsa-oss alsa-tools
 
 # To avoid errors when accessing the sound hardware (such as those you saw earlier),
-# make sure your Linux user is a member of the audio group. 
-sudo usermod -a -G audio $USER
+# make sure your Linux user is a member of the api group. 
+sudo usermod -a -G api $USER
 
 # In Ubuntu, PyAudio requires the PortAudio development headers  
 sudo apt install portaudio19-dev python3-all-dev

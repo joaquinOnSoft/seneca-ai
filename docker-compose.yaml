@@ -2,7 +2,7 @@
 #  docker-compose.yaml
 #  Services:
 #    · ollama     — local LLM server, port 11434
-#    · audio-stt  — Python + ALSA + JACK + PyAudio
+#    · api  — SenecaAI API server, port 1414. Python + ALSA + JACK + PyAudio
 #
 #  Basic usage (CPU):
 #    docker compose up --build
@@ -59,13 +59,14 @@ services:
       retries: 5
 
   # ────────────────────────────────────────────────────────────
-  #  audio-stt — Python with access to host audio hardware
+  #  api - SenecaAI API server, port 1414.
+  #  Python + ALSA + JACK + PyAudio
   # ────────────────────────────────────────────────────────────
-  audio-stt:
+  api:
     build:
       context: . # Changed context to project root
-      dockerfile: ./docker/audio/Dockerfile # Specified full path to Dockerfile
-    container_name: audio-stt
+      dockerfile: ./docker/api/Dockerfile # Specified full path to Dockerfile
+    container_name: api
     restart: unless-stopped
 
     environment:
@@ -93,8 +94,8 @@ services:
       - /dev/snd:/dev/snd
 
     group_add:
-      # Host 'audio' GID must match the one inside the container
-      - audio
+      # Host 'api' GID must match the one inside the container
+      - api
 
     cap_add:
       # Required for JACK real-time scheduling priority
@@ -115,6 +116,8 @@ services:
       retries: 5
     secrets:
       - seneca_ai_api_key_secret
+    storage_opt:
+      size: 5G
 
 # ── Volumes ────────────────────────────────────────────────────
 volumes:
@@ -137,4 +140,4 @@ networks:
 # ── Secrets ────────────────────────────────────────────────────
 secrets:
   seneca_ai_api_key_secret:
-    file: docker/audio/seneca_ai_api_key.txt
+    file: docker/api/seneca_ai_api_key.txt

@@ -52,9 +52,10 @@ ENV PYTHONPATH=/app/src
 RUN printf 'pcm.!default {\n  type hw\n  card 0\n}\nctl.!default {\n  type hw\n  card 0\n}\n' \
     > /etc/asound.conf
 
-# ── Non-root user with audio group access ──────────────────────
-RUN groupadd -r appuser \
-    && useradd -r -g appuser -G audio appuser
+# ── Non-root user with api group access ──────────────────────
+RUN groupadd -r api \
+    && groupadd -r appuser \
+    && useradd -r -g appuser -G api appuser
 
 # Expose the port the Flask app will run on
 EXPOSE 1414

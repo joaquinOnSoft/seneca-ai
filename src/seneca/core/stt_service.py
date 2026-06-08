@@ -40,7 +40,7 @@ class SpeechToTextService:
             return
 
         self._recording = True
-        self._audio_queue = queue.Queue() # Clear any previous audio
+        self._audio_queue = queue.Queue() # Clear any previous api
         self._recording_thread = threading.Thread(target=self._record_audio_task)
         self._recording_thread.start()
         print("Recording started...")
@@ -58,7 +58,7 @@ class SpeechToTextService:
             self._transcription_thread = threading.Thread(target=self._transcribe_audio_task)
             self._transcription_thread.start()
         else:
-            self._on_transcription_complete("") # No audio recorded
+            self._on_transcription_complete("") # No api recorded
 
     def _record_audio_task(self):
         CHUNK = 1024
@@ -90,7 +90,7 @@ class SpeechToTextService:
             self._on_error("Whisper model not loaded.")
             return
 
-        # Collect all audio data from the queue
+        # Collect all api data from the queue
         audio_data = []
         while not self._audio_queue.empty():
             audio_data.append(self._audio_queue.get())
@@ -99,7 +99,7 @@ class SpeechToTextService:
             self._on_transcription_complete("")
             return
 
-        # Convert raw audio bytes to numpy array (float32)
+        # Convert raw api bytes to numpy array (float32)
         # pyaudio.paInt16 means 2 bytes per sample
         audio_bytes = b''.join(audio_data)
         audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0 # Normalize to [-1, 1]

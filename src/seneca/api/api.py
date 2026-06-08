@@ -78,9 +78,8 @@ logging.getLogger().setLevel(logging.INFO)
 
 # --- Swagger Configuration ---
 swagger_config = {
-    "swagger": "2.0", # Added Swagger version
-    "headers": [
-    ],
+    "swagger": "2.0",
+    "headers": [],
     "specs": [
         {
             "endpoint": 'apispec_1',
@@ -99,10 +98,7 @@ swagger_config = {
             "in": "header",
             "description": "API Key required for authentication"
         }
-    },
-    "security": [
-        {"APIKeyHeader": []}
-    ]
+    }
 }
 
 Swagger(api, config=swagger_config)
@@ -111,7 +107,7 @@ Swagger(api, config=swagger_config)
 # --- API Key Validation ---
 def validate_api_key():
     # Exclude health check and Swagger UI paths from API key validation
-    if request.path == '/seneca/v1/health' or request.path == '/apidocs' or request.path.startswith('/flasgger_static'):
+    if request.path in ['/seneca/v1/health', '/apidocs', '/apispec_1.json'] or request.path.startswith('/flasgger_static'):
         return None # No API key needed for these paths
 
     api_key = request.headers.get('X-SENECA-AI-API-KEY')
@@ -132,6 +128,10 @@ def validate_api_key():
 # --- Request Hooks for Correlation ID and API Key Validation ---
 @api.before_request
 def before_request_func():
+    # Explicitly bypass all before_request logic for Swagger UI and spec generation paths
+    if request.path in ['/apidocs', '/apispec_1.json'] or request.path.startswith('/flasgger_static'):
+        return None
+
     # Correlation ID handling
     correlation_id = request.headers.get('X-Correlation-ID', str(uuid.uuid4()))
     g.correlation_id = correlation_id
@@ -144,7 +144,9 @@ def before_request_func():
 
 @api.after_request
 def after_request_func(response):
-    response.headers['X-Correlation-ID'] = g.correlation_id
+    # Safely get correlation_id, providing a default if not set (e.g., for bypassed Swagger requests)
+    correlation_id_to_log = g.get('correlation_id', 'no-correlation-id')
+    response.headers['X-Correlation-ID'] = correlation_id_to_log
     api.logger.info(f"Request finished with status {response.status_code}", extra={'event': 'request_end', 'status_code': response.status_code})
     return response
 
@@ -152,39 +154,39 @@ def after_request_func(response):
 def stt():
     """
     Speech-to-Text (STT) Endpoint
-    This endpoint receives an audio file and transcribes it into text using Faster-Whisper.
+    This endpoint receives an api file and transcribes it into text using Faster-Whisper.
     ---
     parameters:
       - name: file
         in: formData
         type: file
         required: true
-        description: The audio file to transcribe (WAV or MP3 format).
+        description: "The api file to transcribe (WAV or MP3 format)."
       - name: lang
         in: formData
         type: string
         required: false
         default: en
-        description: The language of the audio. e.g., 'en', 'es', 'fr'.
+        description: "The language of the api. e.g., 'en', 'es', 'fr'."
     security:
       - APIKeyHeader: []
     responses:
       200:
-        description: Successfully transcribed text.
+        description: "Successfully transcribed text."
         schema:
           type: object
           properties:
             text:
               type: string
-              description: The transcribed text.
+              description: "The transcribed text."
       400:
-        description: Bad request, e.g., no file provided, empty file, or unsupported file type.
+        description: "Bad request, e.g., no file provided, empty file, or unsupported file type."
       401:
-        description: Unauthorized: API Key missing or invalid.
+        description: "Unauthorized: API Key missing or invalid."
       503:
-        description: Service unavailable, Faster-Whisper model not loaded.
+        description: "Service unavailable, Faster-Whisper model not loaded."
       500:
-        description: Internal server error during transcription.
+        description: "Internal server error during transcription."
     """
     api.logger.info("STT request received.")
 
@@ -193,8 +195,8 @@ def stt():
         return jsonify({"error": "Speech-to-Text service is unavailable."}), 503
 
     if 'file' not in request.files:
-        api.logger.error("No audio file provided in the request.")
-        return jsonify({"error": "No audio file provided"}), 400
+        api.logger.error("No api file provided in the request.")
+        return jsonify({"error": "No api file provided"}), 400
 
     audio_file = request.files['file']
     if audio_file.filename == '':
@@ -205,8 +207,8 @@ def stt():
     file_size = audio_file.tell()
     audio_file.seek(0)
     if file_size == 0:
-        api.logger.error("Received an empty audio file.")
-        return jsonify({"error": "Empty audio file"}), 400
+        api.logger.error("Received an empty api file.")
+        return jsonify({"error": "Empty api file"}), 400
 
     api.logger.info(f"Input file name: {audio_file.filename}")
 
@@ -256,7 +258,7 @@ def get_supported_languages():
       - APIKeyHeader: []
     responses:
       200:
-        description: A list of supported languages.
+        description: "A list of supported languages."
         schema:
           type: array
           items:
@@ -264,12 +266,12 @@ def get_supported_languages():
             properties:
               code:
                 type: string
-                description: The language code (e.g., 'en', 'es').
+                description: "The language code (e.g., 'en', 'es')."
               name:
                 type: string
-                description: The full name of the language (e.g., 'English', 'Spanish').
+                description: "The full name of the language (e.g., 'English', 'Spanish')."
       401:
-        description: Unauthorized: API Key missing or invalid.
+        description: "Unauthorized: API Key missing or invalid."
     """
     api.logger.info("Request received for supported STT languages.")
     supported_languages = [{"code": code, "name": name} for code, name in whisper.tokenizer.LANGUAGES.items()]
@@ -283,7 +285,7 @@ def health_check():
     ---
     responses:
       200:
-        description: API is healthy and model is loaded.
+        description: "API is healthy and model is loaded."
         schema:
           type: object
           properties:
@@ -294,7 +296,7 @@ def health_check():
               type: string
               enum: [loaded]
       503:
-        description: API is degraded, Faster-Whisper model is not loaded.
+        description: "API is degraded, Faster-Whisper model is not loaded."
         schema:
           type: object
           properties:
