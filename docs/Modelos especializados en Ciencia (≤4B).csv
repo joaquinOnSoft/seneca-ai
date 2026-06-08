@@ -1,0 +1,3 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+SciLLM-4B,4B,Papers científicos y revisión,Apache 2.0,86% en SciFact,[Hugging Face](https://huggingface.co/allenai/SciLLM-4B),❌,Fine-tuneado en arXiv, PubMed Central y otros repositorios científicos.
+ArXivLLM-3B,3B,Física, matemáticas y CS,MIT,83% en ArXivQA,[Hugging Face](https://huggingface.co/arxiv-times/ArXivLLM-3B),❌,Especializado en abstracts de arXiv.

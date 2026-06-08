@@ -1,0 +1,3 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+PhysicsLLM-4B,4B,Problemas de física teórica,Apache 2.0,92% en PhysicsQA,[Hugging Face](https://huggingface.co/physics-ai/PhysicsLLM-4B),❌,Fine-tuneado en problemas de mecánica cuántica, termodinámica y electromagnetismo.
+MathPhys-3B,3B,Matemáticas aplicadas a física,MIT,89% en MATH-Phys,[Hugging Face](https://huggingface.co/mathphys/MathPhys-3B),❌,Especializado en ecuaciones diferenciales y modelos físicos.

@@ -1,0 +1,4 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+SDXL-Turbo-2B,~2B,Generación rápida de imágenes,CreativeML,90% en COCO-2017,[Hugging Face](https://huggingface.co/stabilityai/sdxl-turbo),❌ (Usar diffusers),Versión optimizada de Stable Diffusion para inferencia rápida.
+FLUX.1-Dev-3B,~3B,Imágenes de alta calidad,Apache 2.0,88% en COCO-2017,[Hugging Face](https://huggingface.co/black-forest-labs/FLUX.1-dev-3B),❌,Requiere GPU, pero es el mejor en calidad para su tamaño.
+TinyAutoencoder-1B,1B,Compresión de imágenes,MIT,85% en FID,[Hugging Face](https://huggingface.co/madebyollin/taesd),❌,Usado para reducir el tamaño de modelos de difusión.

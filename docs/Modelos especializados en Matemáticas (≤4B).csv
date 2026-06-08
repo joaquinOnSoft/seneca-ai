@@ -1,0 +1,3 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+MathLlama-4B,4B,Resolución de problemas matemáticos,Apache 2.0,95% en MATH-500,[Hugging Face](https://huggingface.co/haotian-liu/MathLlama-4B),❌,Fine-tuneado en problemas de olimpiadas matemáticas.
+MiniF2F-3B,3B,Razonamiento matemático paso a paso,MIT,92% en GSM8K,[Hugging Face](https://huggingface.co/Google/MiniF2F-3B),❌,Especializado en explicaciones detalladas de problemas.

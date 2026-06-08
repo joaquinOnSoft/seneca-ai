@@ -1,0 +1,3 @@
+﻿Modelo,Parámetros,Especialidad,Licencia,Benchmark (2026),Repositorio/Hugging Face,Compatibilidad con Ollama,Notas
+DNABERT-2-4B,4B,Análisis de secuencias de ADN,Apache 2.0,87% en DNAQA,[Hugging Face](https://huggingface.co/zhengxiao2022/DNABERT-2-4B),❌,Especializado en secuencias genómicas (ej: predicción de genes).
+ProtT5-4B,4B,Predicción de estructura de proteínas,MIT,84% en ProtT5-Eval,[Hugging Face](https://huggingface.co/Rostlab/ProtT5-4B),❌,Fine-tuneado en datos de UniProt y PDB.
