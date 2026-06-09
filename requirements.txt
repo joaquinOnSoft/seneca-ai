@@ -19,3 +19,5 @@ pillow
 babel-cli
 python-json-logger
 waitress
+Flask-Limiter>=2.0.0
+pytest

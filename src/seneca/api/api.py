@@ -8,7 +8,10 @@ import whisper
 from faster_whisper import WhisperModel
 from flasgger import Swagger
 from flask import Flask, request, jsonify, g, has_app_context
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from pythonjsonlogger.json import JsonFormatter
+from whisper import tokenizer
 
 from seneca.utils.config import config
 
@@ -103,6 +106,17 @@ swagger_config = {
 
 Swagger(api, config=swagger_config)
 
+# --- Rate Limiting Configuration ---
+def custom_key_func():
+    if request.path in ['/apidocs', '/apispec_1.json'] or request.path.startswith('/flasgger_static'):
+        return request.path # Use path as key to effectively disable rate limit for these
+    return get_remote_address()
+
+limiter = Limiter(
+    key_func=custom_key_func,
+    default_limits=["5 per second"]
+)
+limiter.init_app(api)
 
 # --- API Key Validation ---
 def validate_api_key():

@@ -40,6 +40,7 @@ setup(
         "babel-cli",
         "python-json-logger",
         "waitress",
+        "Flask-Limiter>=2.0.0", # Added for rate limiting
     ],
     entry_points={
         "console_scripts": [
