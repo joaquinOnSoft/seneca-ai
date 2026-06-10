@@ -3,11 +3,15 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
+# 0. Script to detect hardware (RAM & GPU) and select the optimal Ollama AI model
+source ./select_ollama_model.sh
+
 # Identify the actual user (in case the script is run with sudo)
 REAL_USER=${SUDO_USER:-$USER}
 
 # 1. Directory Preparation (This runs regardless of Docker installation)
-echo "Preparing directories for Ollama..."
+echo "Preparing directories for Ollama..."#!/bin/bash
+
 sudo mkdir -p /opt/senecaai/volumes/ollama
 sudo chown -R "$REAL_USER":"$REAL_USER" /opt/senecaai
 

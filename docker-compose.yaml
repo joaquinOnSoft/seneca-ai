@@ -26,7 +26,7 @@ services:
 
     environment:
       # Model the entrypoint will pull on first startup
-      OLLAMA_MODEL: "hadad/LFM2.5-1.2B:Q4_K_M"
+      OLLAMA_MODEL: "${OLLAMA_AI_MODEL:-hadad/LFM2.5-1.2B:Q4_K_M}"
       # Seconds the model stays loaded in memory without requests
       OLLAMA_KEEP_ALIVE: "300"
       # 0 = CPU only · -1 = all layers on GPU

@@ -1,3 +1,6 @@
+# 0. Script to detect hardware (RAM & GPU) and select the optimal Ollama AI model
+& .\select_ollama_model.ps1
+
 # 1. Check for Administrative Privileges
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Warning "This script must be run as Administrator!"
