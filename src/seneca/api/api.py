@@ -11,7 +11,6 @@ from flask import Flask, request, jsonify, g, has_app_context
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from pythonjsonlogger.json import JsonFormatter
-from whisper import tokenizer
 
 from seneca.utils.config import config
 
@@ -121,7 +120,7 @@ limiter.init_app(api)
 # --- API Key Validation ---
 def validate_api_key():
     # Exclude health check and Swagger UI paths from API key validation
-    if request.path in ['/seneca/v1/health', '/apidocs', '/apispec_1.json'] or request.path.startswith('/flasgger_static'):
+    if request.path in ['/senecaai/v1/health', '/apidocs', '/apispec_1.json'] or request.path.startswith('/flasgger_static'):
         return None # No API key needed for these paths
 
     api_key = request.headers.get('X-SENECA-AI-API-KEY')
@@ -164,7 +163,7 @@ def after_request_func(response):
     api.logger.info(f"Request finished with status {response.status_code}", extra={'event': 'request_end', 'status_code': response.status_code})
     return response
 
-@api.route('/seneca/v1/stt', methods=['POST'])
+@api.route('/senecaai/v1/stt', methods=['POST'])
 def stt():
     """
     Speech-to-Text (STT) Endpoint
@@ -262,7 +261,7 @@ def stt():
             os.remove(temp_audio_file_path)
             api.logger.info(f"Temporary file {temp_audio_file_path} removed.")
 
-@api.route('/seneca/v1/stt/languages', methods=['GET'])
+@api.route('/senecaai/v1/stt/languages', methods=['GET'])
 def get_supported_languages():
     """
     Get Supported STT Languages
@@ -291,7 +290,7 @@ def get_supported_languages():
     supported_languages = [{"code": code, "name": name} for code, name in whisper.tokenizer.LANGUAGES.items()]
     return jsonify(supported_languages), 200
 
-@api.route('/seneca/v1/health', methods=['GET'])
+@api.route('/senecaai/v1/health', methods=['GET'])
 def health_check():
     """
     Health Check Endpoint

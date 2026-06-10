@@ -109,7 +109,7 @@ services:
         condition: service_healthy
 
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:1414/seneca/v1/health"] # Cambiado a /seneca/v1/health
+      test: ["CMD", "curl", "-sf", "http://localhost:1414/senecaai/v1/health"] # Cambiado a /seneca/v1/health
       interval: 20s
       timeout: 5s
       start_period: 15s # Give the Flask app time to start

@@ -1,0 +1,98 @@
+{
+	"info": {
+		"_postman_id": "deaa8cb9-7236-4e60-8744-9de8a4323e91",
+		"name": "Seneca AI",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "38339589"
+	},
+	"item": [
+		{
+			"name": "stt",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-SENECA-AI-API-KEY",
+						"value": "{{X-SENECA-AI-API-KEY}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": "/home/joaquin/PycharmProjects/Seneca-AI/assets/audio/1-10-sp.mp3"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{HOST}}/senecaai/v1/stt?lang=es",
+					"host": [
+						"{{HOST}}"
+					],
+					"path": [
+						"senecaai",
+						"v1",
+						"stt"
+					],
+					"query": [
+						{
+							"key": "lang",
+							"value": "es"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "stt/languags",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-SENECA-AI-API-KEY",
+						"value": "{{X-SENECA-AI-API-KEY}}",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": "/home/joaquin/PycharmProjects/Seneca-AI/assets/audio/1-10-sp.mp3"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{HOST}}/senecaai/v1/stt/languages",
+					"host": [
+						"{{HOST}}"
+					],
+					"path": [
+						"senecaai",
+						"v1",
+						"stt",
+						"languages"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "health",
+			"request": {
+				"method": "GET",
+				"header": []
+			},
+			"response": []
+		}
+	]
+}

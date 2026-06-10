@@ -9,18 +9,18 @@ import pytest
 # We assume the import structure is correct from the project root
 from src.seneca.api.api import api as flask_app
 
-API_METHOD_HEALTH = '/seneca/v1/health'
+API_METHOD_HEALTH = '/senecaai/v1/health'
 
-API_METHOD_STT_LANGUAGES = '/seneca/v1/stt/languages'
+API_METHOD_STT_LANGUAGES = '/senecaai/v1/stt/languages'
 
-API_METHOD_STT = '/seneca/v1/stt'
+API_METHOD_STT = '/senecaai/v1/stt'
 
 # from src.seneca.utils.config import config # No longer directly import config here, we'll mock it
 
 # Define a test API key
 TEST_API_KEY = "test-seneca-ai-api-key"
 
-# Mock of the languages returned by the /seneca/v1/stt/languages endpoint
+# Mock of the languages returned by the /senecaai/v1/stt/languages endpoint
 MOCKED_LANGUAGES = [
     {
         "code": "en",
@@ -469,12 +469,12 @@ def mock_temp_file_fixture():
 def delay_to_avoid_too_many_request_per_second():
   sleep(0.2)
 
-# --- Tests for /seneca/v1/stt ---
+# --- Tests for /senecaai/v1/stt ---
 
 def test_stt_success_mp3(client, mock_whisper_model_fixture, mock_temp_file_fixture):
     """
   Tests successful transcription of an MP3 file with a specified language.
-  The /seneca/v1/stt method receives the lang=es parameter and in the body an mp3 file
+  The /senecaai/v1/stt method receives the lang=es parameter and in the body an mp3 file
   (simulated) and returns the following: { "text": " 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10" }
   """
     mock_file_obj, mock_os_remove = mock_temp_file_fixture
@@ -527,7 +527,7 @@ def test_stt_invalid_file_type(client):
         'file': (io.BytesIO(dummy_txt_content), 'test.txt')
     }
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
-    response = client.post('/seneca/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
+    response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
     assert response.status_code == 400
     assert json.loads(response.data) == {"error": "Invalid file type. Only .wav and .mp3 are supported."}
 
@@ -540,7 +540,7 @@ def test_stt_model_not_loaded(client):
             'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
         }
         headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
-        response = client.post('/seneca/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
+        response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
         assert response.status_code == 503
         assert json.loads(response.data) == {"error": "Speech-to-Text service is unavailable."}
 
@@ -571,7 +571,7 @@ def test_stt_missing_api_key(client):
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }
-    response = client.post('/seneca/v1/stt', data=data, content_type='multipart/form-data')  # No headers
+    response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data')  # No headers
     assert response.status_code == 401
     assert json.loads(response.data) == {"error": "Unauthorized: API Key missing"}
 
@@ -583,17 +583,17 @@ def test_stt_invalid_api_key(client):
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }
     headers = {'X-SENECA-AI-API-KEY': "invalid-key"}
-    response = client.post('/seneca/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
+    response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
     assert response.status_code == 401
     assert json.loads(response.data) == {"error": "Unauthorized: Invalid API Key"}
 
 
-# --- Tests for /seneca/v1/stt/languages ---
+# --- Tests for /senecaai/v1/stt/languages ---
 
 def test_get_supported_languages(client):
     """
   Tests the endpoint for getting supported languages.
-  The /seneca/v1/stt/languages method returns the MOCKED_LANGUAGES list.
+  The /senecaai/v1/stt/languages method returns the MOCKED_LANGUAGES list.
   """
     # Mock whisper.tokenizer.LANGUAGES only for this test
     with patch('whisper.tokenizer.LANGUAGES', {lang['code']: lang['name'] for lang in MOCKED_LANGUAGES}):
@@ -620,7 +620,7 @@ def test_get_supported_languages_invalid_api_key(client):
     assert json.loads(response.data) == {"error": "Unauthorized: Invalid API Key"}
 
 
-# --- Tests for /seneca/v1/health ---
+# --- Tests for /senecaai/v1/health ---
 
 def test_health_check_model_loaded(client, mock_whisper_model_fixture):
     """Tests the health check endpoint when the Faster-Whisper model is loaded."""
