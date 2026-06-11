@@ -6,8 +6,9 @@ To install Seneca AI in Windows, follow these steps:
  - Unzip the zip file
  - In the `Start menu` search, right-click **Terminal** (or **Command Prompt**) and select **Run as administrator**.
  - Execute the installer:
+
    ```shell
-   c:> .\install-win.ps1
+   c:\Program Files\Seneca-AI> .\install-win.ps1
    ```
    
 ## Troubleshooting
@@ -20,5 +21,6 @@ To install Seneca AI in Windows, follow these steps:
     ```powershell
     set-executionpolicy remotesigned
     ```
+
 This will allow running unsigned scripts that you write on your local computer and signed scripts from Internet. 
 This will change the policy permanently.
