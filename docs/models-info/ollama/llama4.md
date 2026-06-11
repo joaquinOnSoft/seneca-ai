@@ -10,7 +10,7 @@ Here is a step-by-step guide to setting up Llama 4 in PyCharm:
 
 ## Prerequisites
 
-See [Installing Ollama](/docs/ollama.md)
+See [Installing Ollama](/docs/models-info/ollama.mdfo/ollama.md)
 
 ## Method 1: Using JetBrains AI Assistant (Recommended)
 

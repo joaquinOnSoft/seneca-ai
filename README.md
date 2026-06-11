@@ -20,6 +20,13 @@ Seneca is a **multi-purpose, cross-platform** AI assistant built on European ope
 
 ---
 
+## Installation
+
+To install Seneca AI, follow the instructions in the tutorial for your operating system:
+
+ - [Seneca AI: Linux installation (Ubuntu)](docs/installacion-linux.md)
+ - [Seneca AI: Windows installation](docs/installacion-win.md)
+
 ## Project Structure
 
 ```

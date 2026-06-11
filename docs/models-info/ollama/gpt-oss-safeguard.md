@@ -8,7 +8,7 @@ This model is designed to fit into **GPUs with 16GB of VRAM**. (21B parameters w
 
 ## Prerequisites
 
-See [Installing Ollama](/docs/ollama.md)
+See [Installing Ollama](/docs/models-info/ollama.mdfo/ollama.md)
 
 ## Get started
 
