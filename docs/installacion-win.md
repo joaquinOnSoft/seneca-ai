@@ -8,7 +8,8 @@ To install Seneca AI in Windows, follow these steps:
  - Execute the installer:
 
    ```shell
-   c:\Program Files\Seneca-AI> .\install-win.ps1
+   cd c:\Program Files\Seneca-AI> 
+   .\install-win.ps1
    ```
    
 ## Troubleshooting

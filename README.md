@@ -27,6 +27,8 @@ To install Seneca AI, follow the instructions in the tutorial for your operating
  - [Seneca AI: Linux installation (Ubuntu)](docs/installacion-linux.md)
  - [Seneca AI: Windows installation](docs/installacion-win.md)
 
+Seneca AI relies on [Docker containers](docs/containers.md) to run all the services required to provide the service
+
 ## Project Structure
 
 ```
@@ -112,11 +114,11 @@ cp .env.example .env
 
 #### Supported providers
 
-| `LLM_PROVIDER` | Required env vars |
-|---|---|
-| `openai` (default) | `OPENAI_API_KEY`, `OPENAI_MODEL` |
-| `ollama` | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
-| `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` |
+| `LLM_PROVIDER`     | Required env vars                      |
+|--------------------|----------------------------------------|
+| `openai`           | `OPENAI_API_KEY`, `OPENAI_MODEL`       |
+| `ollama` (default) | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`      |
+| `anthropic`        | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` |
 
 ### 4. Run
 
