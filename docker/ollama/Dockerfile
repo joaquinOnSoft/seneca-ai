@@ -16,7 +16,9 @@ ENV OLLAMA_MODEL="hadad/LFM2.5-1.2B:Q4_K_M" \
 VOLUME ["/root/.ollama"]
 
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+#RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r//' /entrypoint.sh && chmod +x /entrypoint.sh
+
 
 EXPOSE 11434
 
