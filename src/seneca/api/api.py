@@ -328,5 +328,10 @@ def health_check():
         return jsonify({"status": "degraded", "model_status": "not loaded"}), 503
 
 if __name__ == '__main__':
+    from urllib.parse import urlparse
     from waitress import serve
-    serve(api, host="0.0.0.0", port=1414)
+
+    _parsed = urlparse(config.seneca_api_base_url)
+    _host = _parsed.hostname or "0.0.0.0"
+    _port = _parsed.port or 1414
+    serve(api, host="0.0.0.0", port=_port)

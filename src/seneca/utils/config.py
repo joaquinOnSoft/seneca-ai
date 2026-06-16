@@ -76,6 +76,13 @@ class AppConfig:
         default_factory=lambda: os.getenv("HF_TOKEN", "")
     )
 
+    # Seneca API base URL
+    seneca_api_base_url: str = field(
+        default_factory=lambda: os.getenv(
+            "SENECA_API_BASE_URL", "http://localhost:1414"
+        )
+    )
+
     # Seneca AI API Key for authentication
     seneca_ai_api_key: str = field(
         default_factory=lambda: os.getenv("SENECA_AI_API_KEY", "")
