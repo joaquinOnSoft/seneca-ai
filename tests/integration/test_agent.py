@@ -1,14 +1,8 @@
-"""
-tests/integration/test_agent.py – Integration tests for SenecaAgent.
-
-These tests are skipped unless a real LLM_PROVIDER and credentials are
-configured in the environment, so they do not run in CI by default.
-"""
-
 import os
 import sys
 import threading
 from pathlib import Path
+from typing import Any # Import Any for type hinting if needed, though str is preferred here
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
@@ -28,17 +22,21 @@ class TestSenecaAgentIntegration:
     def test_stream_reply_produces_tokens(self):
         agent = SenecaAgent()
         conv = Conversation()
-        conv.add_message(Role.USER, "Say exactly: Hello World")
+        conv.add_message(Role.USER, "CRITICAL: Say exactly 'Hello World'")
 
         tokens: list[str] = []
         done_event = threading.Event()
         error_holder: list[str] = []
 
+        def handle_error(e: str):
+            error_holder.append(e)
+            done_event.set()
+
         agent.stream_reply(
             conversation=conv,
             on_token=tokens.append,
             on_done=lambda _: done_event.set(),
-            on_error=lambda e: (error_holder.append(e), done_event.set()),
+            on_error=handle_error,
         )
 
         done_event.wait(timeout=30)
