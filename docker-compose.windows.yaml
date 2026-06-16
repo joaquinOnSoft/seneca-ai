@@ -1,0 +1,36 @@
+# ══════════════════════════════════════════════════════════════
+#  docker-compose.windows.yaml  —  Windows override
+#
+#  Use together with the base file:
+#    docker compose -f docker-compose.yaml -f docker-compose.windows.yaml up --build
+#
+#  The install-win.ps1 script does this automatically.
+#
+#  What this override changes vs the Linux base:
+#    · api.volumes     — removes the PulseAudio socket mount (Linux-only)
+#    · api.devices     — removed (ALSA /dev/snd does not exist on Windows)
+#    · api.group_add   — removed (Linux group model, not applicable on Windows)
+#    · api.cap_add     — removed (Linux capabilities, ignored/unsupported on Windows)
+#    · api.storage_opt — removed (overlay2 storage option, Linux-only)
+#
+#  Audio note:
+#    ALSA/JACK/PulseAudio are not available on Windows hosts. Audio features
+#    that depend on direct hardware access will not work under Windows Docker.
+#    The container can still serve the REST API and LLM inference normally.
+# ══════════════════════════════════════════════════════════════
+
+services:
+
+  api:
+    volumes: !reset
+      # Source code mounted for hot-reload — same as Linux
+      - ./src:/app/src
+      # PulseAudio socket removed: does not exist on Windows hosts
+
+    devices: !reset [] # /dev/snd (ALSA) does not exist on Windows
+
+    group_add: !reset []  # Linux group model — not applicable on Windows
+
+    cap_add: !reset [] # SYS_NICE (JACK RT priority) — not applicable on Windows
+
+    storage_opt: {}    # overlay2 size option — Linux-only, removed on Windows

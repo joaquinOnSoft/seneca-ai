@@ -4,7 +4,84 @@
 
 # Determine script's own directory (for consistent file paths)
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$MarkerFile = Join-Path $ScriptDir "installer-2nd-execution.txt"
+$MarkerFile   = Join-Path $ScriptDir "installer-2nd-execution.txt"
+$EnvFile      = Join-Path $ScriptDir ".env"
+$OllamaPath   = "C:\ProgramData\senecaai\volumes\ollama"
+
+# Docker Compose command: base file + Windows override
+$ComposeFiles = "-f docker-compose.yaml -f docker-compose.windows.yaml"
+
+# ============================================================
+# FUNCTION: Write/merge OLLAMA_MODELS_PATH into .env
+# ============================================================
+function Write-OllamaEnvVar {
+    param([string]$Path, [string]$EnvFilePath)
+
+    # Convert Windows path to forward-slash format for Docker bind mount
+    $DockerPath = $Path -replace '\\', '/'
+
+    if (Test-Path $EnvFilePath) {
+        $lines = Get-Content $EnvFilePath
+        $found = $false
+        $lines = $lines | ForEach-Object {
+            if ($_ -match '^OLLAMA_MODELS_PATH=') {
+                "OLLAMA_MODELS_PATH=$DockerPath"
+                $found = $true
+            } else { $_ }
+        }
+        if (-not $found) { $lines += "OLLAMA_MODELS_PATH=$DockerPath" }
+        $lines | Set-Content $EnvFilePath -Encoding UTF8
+        Write-Host "Updated OLLAMA_MODELS_PATH in .env: $DockerPath" -ForegroundColor Green
+    } else {
+        "OLLAMA_MODELS_PATH=$DockerPath" | Set-Content $EnvFilePath -Encoding UTF8
+        Write-Host "Created .env with OLLAMA_MODELS_PATH=$DockerPath" -ForegroundColor Green
+    }
+}
+
+# ============================================================
+# FUNCTION: Remove existing ollama_models Docker volume
+# so Docker re-creates it with the current device path from .env
+# ============================================================
+function Reset-OllamaVolume {
+    # Docker Compose derives the project name from the folder name, lowercased,
+    # stripping all non-alphanumeric characters (not replacing -- just removing).
+    # e.g. "seneca-ai" -> "senecaai", so the volume becomes "senecaai_ollama_models".
+    # We also try the raw lowercased folder name as a fallback (e.g. "seneca-ai_ollama_models").
+    $folderName    = (Split-Path $ScriptDir -Leaf).ToLower()
+    $projectName   = $folderName -replace '[^a-z0-9]', ''
+    $volumeName    = "${projectName}_ollama_models"
+    $volumeNameRaw = "${folderName}_ollama_models"
+
+    Write-Host "Checking for existing Docker ollama_models volume..." -ForegroundColor Cyan
+
+    $allVolumes = docker volume ls --format "{{.Name}}"
+    $found = $allVolumes | Where-Object { $_ -eq $volumeName -or $_ -eq $volumeNameRaw }
+
+    if ($found) {
+        foreach ($vol in $found) {
+            Write-Host "Stopping any containers using volume '$vol'..." -ForegroundColor Yellow
+            # Stop and remove any containers referencing this volume before trying to delete it
+            Invoke-Expression "docker compose $ComposeFiles down" 2>$null
+            docker compose down 2>$null
+
+            Write-Host "Removing stale volume '$vol'..." -ForegroundColor Yellow
+            docker volume rm $vol 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Volume '$vol' removed -- will be re-created with the correct Windows path." -ForegroundColor Green
+            } else {
+                Write-Host "WARNING: Could not remove volume '$vol'. Forcing removal..." -ForegroundColor Yellow
+                docker volume rm --force $vol 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "ERROR: Failed to remove volume '$vol'. Please run manually: docker volume rm $vol" -ForegroundColor Red
+                    Exit 1
+                }
+                Write-Host "Volume '$vol' force-removed." -ForegroundColor Green
+            }
+        }
+    } else {
+        Write-Host "No existing ollama_models volume found -- nothing to remove." -ForegroundColor Green
+    }
+}
 
 # ============================================================
 # FUNCTION: Start Docker Engine service and wait until ready
@@ -100,17 +177,24 @@ if (Test-Path $MarkerFile) {
 
     Write-Host "Docker detected: $(docker --version)" -ForegroundColor Green
 
+    # Set working directory first so .env is always found by docker compose
+    Set-Location $ScriptDir
+
+    # Ensure .env has the correct Windows path (in case it was missing or deleted)
+    Write-OllamaEnvVar -Path $OllamaPath -EnvFilePath $EnvFile
+    Write-Host "OLLAMA_MODELS_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
+
     # Start Docker Engine service and wait until the daemon is ready
     Start-DockerEngine
 
     # 7. Builds, (re)creates, starts, and attaches to containers for the service.
     Write-Host "--------------------------------------------------------" -ForegroundColor Cyan
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
-    Set-Location $ScriptDir
-    docker compose up --build
+    Reset-OllamaVolume
+    Invoke-Expression "docker compose $ComposeFiles up --build"
 
     # 8. Run containers in background
-    docker compose up -d
+    Invoke-Expression "docker compose $ComposeFiles up -d"
 
     Write-Host "============================================================" -ForegroundColor Green
     Write-Host " Installation complete!" -ForegroundColor Green
@@ -181,9 +265,7 @@ if ($pythonCmd) {
 Write-Host "--------------------------------------------------------"
 
 # 2. Directory Preparation
-# In Windows, a common equivalent for shared app data/volumes is C:\ProgramData
-$OllamaPath = "C:\ProgramData\senecaai\volumes\ollama"
-
+# $OllamaPath is defined at the top of the script: C:\ProgramData\senecaai\volumes\ollama
 Write-Host "Preparing directories for Ollama..." -ForegroundColor Cyan
 if (-not (Test-Path $OllamaPath)) {
     New-Item -ItemType Directory -Path $OllamaPath -Force | Out-Null
@@ -191,6 +273,9 @@ if (-not (Test-Path $OllamaPath)) {
 } else {
     Write-Host "Directory already exists: $OllamaPath" -ForegroundColor Yellow
 }
+
+# Write OLLAMA_MODELS_PATH to .env so docker-compose picks up the Windows path
+Write-OllamaEnvVar -Path $OllamaPath -EnvFilePath $EnvFile
 
 # 3. Check if Docker is already installed
 if (Get-Command docker -ErrorAction SilentlyContinue) {
@@ -200,12 +285,15 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Host "Skipping Docker installation steps."
     Write-Host "--------------------------------------------------------"
 
-    # Docker already present — start engine and go straight to containers
+    # Docker already present -- start engine and go straight to containers
+    # Set working directory first so .env is always found by docker compose
+    Set-Location $ScriptDir
+    Write-Host "OLLAMA_MODELS_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
     Start-DockerEngine
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
-    Set-Location $ScriptDir
-    docker compose up --build
-    docker compose up -d
+    Reset-OllamaVolume
+    Invoke-Expression "docker compose $ComposeFiles up --build"
+    Invoke-Expression "docker compose $ComposeFiles up -d"
 
     Write-Host "============================================================" -ForegroundColor Green
     Write-Host " Installation complete!" -ForegroundColor Green
@@ -253,7 +341,7 @@ Register-ScheduledTask `
     -Settings  $Settings `
     -Force | Out-Null
 
-Write-Host "Scheduled task '$TaskName' created — will run once after next login." -ForegroundColor Green
+Write-Host "Scheduled task '$TaskName' created -- will run once after next login." -ForegroundColor Green
 
 # --- Create the marker file so the next execution knows it's post-reboot ---
 New-Item -ItemType File -Path $MarkerFile -Force | Out-Null
@@ -264,4 +352,4 @@ Write-Host " Please RESTART your computer now to complete the setup." -Foregroun
 Write-Host " The script will resume automatically after you log in." -ForegroundColor Yellow
 Write-Host "============================================================" -ForegroundColor Yellow
 
-Exit
+Exit	
