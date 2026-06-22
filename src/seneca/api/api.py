@@ -57,16 +57,22 @@ handler.setFormatter(formatter)
 api.logger.addHandler(handler)
 logging.getLogger().addHandler(handler)
 
-# Initialize faster-whisper model globally to avoid reloading on each request
+# Initialize STT model globally to avoid reloading on each request
+model = None
 try:
-    model = WhisperModel(
-        config.whisper_model_size,
-        device=config.whisper_device,
-        compute_type=config.whisper_compute_type
-    )
-    api.logger.info(f"Faster-Whisper model '{config.whisper_model_size}' loaded successfully on {config.whisper_device} with compute type {config.whisper_compute_type}.")
+    if config.stt_backend == 'faster-whisper':
+        model = WhisperModel(
+            config.whisper_model_size,
+            device=config.whisper_device,
+            compute_type=config.whisper_compute_type
+        )
+        api.logger.info(f"Faster-Whisper model '{config.whisper_model_size}' loaded successfully on {config.whisper_device} with compute type {config.whisper_compute_type}.")
+    elif config.stt_backend == 'google':
+        api.logger.info("Google Web Speech STT backend selected.")
+    else:
+        api.logger.warning(f"Unknown STT_BACKEND '{config.stt_backend}'.")
 except Exception as e:
-    api.logger.error(f"Failed to load Faster-Whisper model with config: size={config.whisper_model_size}, device={config.whisper_device}, compute_type={config.whisper_compute_type}. Error: {e}", exc_info=True)
+    api.logger.error(f"Failed to load STT backend '{config.stt_backend}'. Error: {e}", exc_info=True)
     model = None
 
 # Apply the RequestIdFilter AFTER module-level initialization that might log errors
@@ -203,7 +209,7 @@ def stt():
     """
     api.logger.info("STT request received.")
 
-    if model is None:
+    if config.stt_backend == 'faster-whisper' and model is None:
         api.logger.error("Faster-Whisper model is not loaded. Cannot process request.")
         return jsonify({"error": "Speech-to-Text service is unavailable."}), 503
 
@@ -243,10 +249,19 @@ def stt():
             temp_audio_file_path = temp_audio_file.name
         api.logger.info(f"Audio file saved temporarily to {temp_audio_file_path}")
 
-        segments, info = model.transcribe(temp_audio_file_path, language=lang)
-        api.logger.info(f"Detected language by Whisper: {info.language} with probability {info.language_probability:.2f}")
-
-        full_text = "".join([segment.text for segment in segments])
+        if config.stt_backend == 'faster-whisper':
+            segments, info = model.transcribe(temp_audio_file_path, language=lang)
+            api.logger.info(f"Detected language by Whisper: {info.language} with probability {info.language_probability:.2f}")
+            full_text = "".join([segment.text for segment in segments])
+        elif config.stt_backend == 'google':
+            import speech_recognition as sr
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(temp_audio_file_path) as source:
+                audio_data = recognizer.record(source)
+            full_text = recognizer.recognize_google(audio_data, language=lang)
+        else:
+            api.logger.error(f"Unsupported STT backend: {config.stt_backend}")
+            return jsonify({"error": "Unsupported STT backend configured."}), 500
 
         truncated_text = (full_text[:100] + '...') if len(full_text) > 100 else full_text
         api.logger.info(f"Transcription successful. Text: '{truncated_text}'")
@@ -321,10 +336,12 @@ def health_check():
               enum: [not loaded]
     """
     api.logger.info("Health check request received.")
-    if model is not None:
+    if config.stt_backend == 'google':
+        return jsonify({"status": "ok", "model_status": "google_online"}), 200
+    elif config.stt_backend == 'faster-whisper' and model is not None:
         return jsonify({"status": "ok", "model_status": "loaded"}), 200
     else:
-        api.logger.warning("Health check: Faster-Whisper model is not loaded.")
+        api.logger.warning("Health check: Faster-Whisper model is not loaded or backend is unsupported.")
         return jsonify({"status": "degraded", "model_status": "not loaded"}), 503
 
 if __name__ == '__main__':

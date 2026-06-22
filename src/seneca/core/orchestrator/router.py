@@ -6,7 +6,9 @@ Created on Sat May 30 06:41:30 2026
 """
 
 from typing import Dict
+
 from orchestrator.ollama_client import OllamaClient
+
 
 class QueryRouter:
     def __init__(self):

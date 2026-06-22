@@ -1,10 +1,11 @@
+import io
 import queue
 import threading
+import wave
 
-import numpy as np
 import pyaudio
-from faster_whisper import WhisperModel
 
+from seneca.api.client import SenecaApiClient, SenecaApiError
 from seneca.utils.config import config
 
 
@@ -13,27 +14,15 @@ class SpeechToTextService:
         self._on_transcription_complete = on_transcription_complete
         self._on_error = on_error
 
-        self._model = None
+        self._client = SenecaApiClient(
+            base_url=config.seneca_api_base_url,
+            api_key=config.seneca_ai_api_key
+        )
         self._recording_thread = None
         self._transcription_thread = None
         self._audio_queue = queue.Queue()
         self._recording = False
         self._pyaudio_instance = pyaudio.PyAudio()
-
-        self._load_whisper_model()
-
-    def _load_whisper_model(self):
-        try:
-            print(f"Loading Whisper model: {config.whisper_model_size}, device: {config.whisper_device}, compute_type: {config.whisper_compute_type}")
-            self._model = WhisperModel(
-                config.whisper_model_size,
-                device=config.whisper_device,
-                compute_type=config.whisper_compute_type
-            )
-            print("Whisper model loaded successfully.")
-        except Exception as e:
-            self._on_error(f"Failed to load Whisper model: {e}")
-            self._model = None # Ensure model is None if loading fails
 
     def start_recording(self):
         if self._recording:
@@ -86,10 +75,6 @@ class SpeechToTextService:
             self._recording = False # Stop recording flag on error
 
     def _transcribe_audio_task(self):
-        if not self._model:
-            self._on_error("Whisper model not loaded.")
-            return
-
         # Collect all api data from the queue
         audio_data = []
         while not self._audio_queue.empty():
@@ -99,15 +84,27 @@ class SpeechToTextService:
             self._on_transcription_complete("")
             return
 
-        # Convert raw api bytes to numpy array (float32)
-        # pyaudio.paInt16 means 2 bytes per sample
         audio_bytes = b''.join(audio_data)
-        audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0 # Normalize to [-1, 1]
+
+        # Create an in-memory WAV file
+        wav_buffer = io.BytesIO()
+        wav_buffer.name = "audio.wav"
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(self._pyaudio_instance.get_sample_size(pyaudio.paInt16))
+            wav_file.setframerate(16000)
+            wav_file.writeframes(audio_bytes)
+        
+        wav_buffer.seek(0)
+        
+        # Extract base language from locale (e.g. "es" from "es_ES")
+        lang_code = config.app_locale.split('_')[0] if config.app_locale else "en"
 
         try:
-            segments, info = self._model.transcribe(audio_np, beam_size=5)
-            transcription = "".join(segment.text for segment in segments)
-            self._on_transcription_complete(transcription)
+            result = self._client.speech_to_text(audio=wav_buffer, lang=lang_code, filename="audio.wav")
+            self._on_transcription_complete(result.text)
+        except SenecaApiError as e:
+            self._on_error(f"API Error during transcription: {e}")
         except Exception as e:
             self._on_error(f"Error during transcription: {e}")
 

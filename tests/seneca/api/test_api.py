@@ -437,6 +437,7 @@ def client():
     mock_config.whisper_device = "cpu"  # Default value
     mock_config.whisper_compute_type = "int8"  # Default value
     mock_config.hf_token = None  # Default value, or set a test token if needed
+    mock_config.stt_backend = "faster-whisper"  # Default backend for most tests
 
     # Patch the config object in the api module
     with patch('src.seneca.api.api.config', new=mock_config):
@@ -498,6 +499,32 @@ def test_stt_success_mp3(client, mock_whisper_model_fixture, mock_temp_file_fixt
     assert json.loads(response.data) == {"text": " 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"}
     mock_whisper_model_fixture.transcribe.assert_called_once_with(mock_file_obj.name, language='es')
     mock_os_remove.assert_called_once_with(mock_file_obj.name)
+
+def test_stt_success_google_backend(client, mock_temp_file_fixture):
+    """Tests successful transcription using the Google Web Speech backend."""
+    mock_file_obj, mock_os_remove = mock_temp_file_fixture
+    
+    # Temporarily change backend to google for this test
+    with patch('src.seneca.api.api.config.stt_backend', 'google'):
+        # Mock speech_recognition
+        with patch('speech_recognition.Recognizer.record') as mock_record, \
+             patch('speech_recognition.Recognizer.recognize_google') as mock_recognize, \
+             patch('speech_recognition.AudioFile') as mock_audiofile:
+             
+            mock_recognize.return_value = "Google transcription result"
+            
+            dummy_mp3_content = b"fake mp3 data"
+            data = {
+                'file': (io.BytesIO(dummy_mp3_content), 'test.wav'),
+                'lang': 'en'
+            }
+            headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
+            response = client.post(API_METHOD_STT, data=data, content_type='multipart/form-data', headers=headers)
+            
+            assert response.status_code == 200
+            assert json.loads(response.data) == {"text": "Google transcription result"}
+            mock_recognize.assert_called_once()
+            mock_os_remove.assert_called_once_with(mock_file_obj.name)
 
 
 def test_stt_no_file_provided(client):
@@ -628,6 +655,13 @@ def test_health_check_model_loaded(client, mock_whisper_model_fixture):
     response = client.get(API_METHOD_HEALTH)  # No headers needed for health check
     assert response.status_code == 200
     assert json.loads(response.data) == {"status": "ok", "model_status": "loaded"}
+
+def test_health_check_google_backend(client):
+    """Tests the health check endpoint when the Google Web Speech backend is used."""
+    with patch('src.seneca.api.api.config.stt_backend', 'google'):
+        response = client.get(API_METHOD_HEALTH)
+        assert response.status_code == 200
+        assert json.loads(response.data) == {"status": "ok", "model_status": "google_online"}
 
 
 def test_health_check_model_not_loaded(client):

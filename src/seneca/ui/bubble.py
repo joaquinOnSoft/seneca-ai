@@ -69,13 +69,17 @@ class UserBubble(ctk.CTkFrame):
         self.pack(fill="x", padx=12, pady=(8, 0))
 
     def _update_height(self) -> None:
-        """Heuristic to adjust textbox height based on line count."""
-        # Force update to get accurate text stats
+        """Adjust textbox height based on actual display height in pixels."""
         self._markdown_view.update_idletasks()
-        # Count lines in the underlying textbox
-        line_count = float(self._markdown_view.get("1.0", "end-1c").count("\n") + 1)
-        # Approximate height: lines * line_height + some padding
-        new_height = int(line_count * 22) + 10 
+        textbox = self._markdown_view._textbox
+        result = textbox.count("1.0", "end", "ypixels")
+        if result is not None:
+            new_height = result[0] + 12
+        else:
+            text = self._markdown_view.get("1.0", "end-1c")
+            lines = text.count("\n") + 1
+            wrapped_lines = sum(max(1, len(line) // 50) for line in text.split("\n"))
+            new_height = int(max(lines, wrapped_lines) * 25) + 15
         self._markdown_view.configure(height=new_height)
 
 
@@ -143,15 +147,17 @@ class AssistantBubble(ctk.CTkFrame):
             self.master.scroll_to_bottom()
 
     def _update_height(self) -> None:
-        """Heuristic to adjust textbox height based on content."""
+        """Adjust textbox height based on actual display height in pixels."""
         self._markdown_view.update_idletasks()
-        # Count total characters and estimate lines based on width (approx 60 chars per line at 440px)
-        # plus actual newlines. This is more robust for streaming.
-        text = self._markdown_view.get("1.0", "end-1c")
-        lines = text.count("\n") + 1
-        wrapped_lines = sum(max(1, len(line) // 65) for line in text.split("\n"))
-        
-        new_height = int(max(lines, wrapped_lines) * 22) + 10
+        textbox = self._markdown_view._textbox
+        result = textbox.count("1.0", "end", "ypixels")
+        if result is not None:
+            new_height = result[0] + 12
+        else:
+            text = self._markdown_view.get("1.0", "end-1c")
+            lines = text.count("\n") + 1
+            wrapped_lines = sum(max(1, len(line) // 50) for line in text.split("\n"))
+            new_height = int(max(lines, wrapped_lines) * 25) + 15
         self._markdown_view.configure(height=new_height)
 
     def set_error(self, message: str) -> None:

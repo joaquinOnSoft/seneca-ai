@@ -7,19 +7,23 @@ single :class:`AppConfig` dataclass consumed by the rest of the app.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+logger = logging.getLogger(__name__)
+
 # Load .env from project root (two levels up from this file)
 _ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 load_dotenv(dotenv_path=_ENV_PATH)
 
 # Allowed values for faster-whisper configuration
-_ALLOWED_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v3"}
-_ALLOWED_COMPUTE_TYPES = {"int8", "float16"}
+_ALLOWED_FASTER_WHISPER_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v3"}
+_ALLOWED_FASTER_WHISPER_COMPUTE_TYPES = {"int8", "float16"}
+_ALLOWED_STT_BACKENDS = {"faster-whisper", "google"}
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,10 @@ class AppConfig:
         )
     )
     
+    # STT configuration
+    stt_backend: str = field(
+        default_factory=lambda: os.getenv("STT_BACKEND", "faster-whisper")
+    )
     # Faster-whisper configuration
     whisper_model_size: str = field(
         default_factory=lambda: os.getenv("WHISPER_MODEL_SIZE", "small")
@@ -92,14 +100,19 @@ class AppConfig:
     )
 
     def __post_init__(self):
+        # Basic validation for stt_backend
+        if self.stt_backend not in _ALLOWED_STT_BACKENDS:            
+            logger.warning(f"Invalid STT_BACKEND '{self.stt_backend}'. Defaulting to 'faster-whisper'.")
+            object.__setattr__(self, 'stt_backend', 'faster-whisper')
+
         # Basic validation for whisper_model_size
-        if self.whisper_model_size not in _ALLOWED_MODEL_SIZES:
-            print(f"Warning: Invalid WHISPER_MODEL_SIZE '{self.whisper_model_size}'. Defaulting to 'small'.")
+        if self.whisper_model_size not in _ALLOWED_FASTER_WHISPER_MODEL_SIZES:
+            logger.warning(f"Invalid WHISPER_MODEL_SIZE '{self.whisper_model_size}'. Defaulting to 'small'.")
             object.__setattr__(self, 'whisper_model_size', 'small')
         
         # Basic validation for whisper_compute_type
-        if self.whisper_compute_type not in _ALLOWED_COMPUTE_TYPES:
-            print(f"Warning: Invalid WHISPER_COMPUTE_TYPE '{self.whisper_compute_type}'. Defaulting to 'int8'.")
+        if self.whisper_compute_type not in _ALLOWED_FASTER_WHISPER_COMPUTE_TYPES:
+            logger.warning(f"Invalid WHISPER_COMPUTE_TYPE '{self.whisper_compute_type}'. Defaulting to 'int8'.")
             object.__setattr__(self, 'whisper_compute_type', 'int8')
 
         # Read SENECA_AI_API_KEY from file if SENECA_AI_API_KEY_FILE is provided
@@ -107,10 +120,10 @@ class AppConfig:
             try:
                 with open(self.seneca_ai_api_key_file, 'r') as f:
                     secret_value = f.read().strip()
-                    object.__setattr__(self, 'seneca_ai_api_key', secret_value)
-                print(f"Info: SENECA_AI_API_KEY loaded from file: {self.seneca_ai_api_key_file}")
+                    object.__setattr__(self, 'SENECA_AI_API_KEY', secret_value)
+                logger.info(f"SENECA_AI_API_KEY loaded from file: {self.seneca_ai_api_key_file}")
             except Exception as e:
-                print(f"Warning: Could not read SENECA_AI_API_KEY from file {self.seneca_ai_api_key_file}. Error: {e}")
+                logger.warning(f"Could not read SENECA_AI_API_KEY from file {self.seneca_ai_api_key_file}. Error: {e}")
 
 
 # Singleton – import and use directly
