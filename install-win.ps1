@@ -7,15 +7,20 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $MarkerFile   = Join-Path $ScriptDir "installer-2nd-execution.txt"
 $EnvFile      = Join-Path $ScriptDir ".env"
 $OllamaPath   = "C:\ProgramData\senecaai\volumes\ollama"
+$MongoPath    = "C:\ProgramData\senecaai\volumes\mongo" # New: Mongo data path
 
 # Docker Compose command: base file + Windows override
 $ComposeFiles = "-f docker-compose.yaml -f docker-compose.windows.yaml"
 
 # ============================================================
-# FUNCTION: Write/merge OLLAMA_MODELS_PATH into .env
+# FUNCTION: Write/merge an environment variable into .env
 # ============================================================
-function Write-OllamaEnvVar {
-    param([string]$Path, [string]$EnvFilePath)
+function Write-EnvVar {
+    param(
+        [string]$EnvVarName,
+        [string]$Path,
+        [string]$EnvFilePath
+    )
 
     # Convert Windows path to forward-slash format for Docker bind mount
     $DockerPath = $Path -replace '\\', '/'
@@ -24,35 +29,38 @@ function Write-OllamaEnvVar {
         $lines = Get-Content $EnvFilePath
         $found = $false
         $lines = $lines | ForEach-Object {
-            if ($_ -match '^OLLAMA_MODELS_PATH=') {
-                "OLLAMA_MODELS_PATH=$DockerPath"
+            if ($_ -match "^${EnvVarName}=") {
+                "${EnvVarName}=$DockerPath"
                 $found = $true
             } else { $_ }
         }
-        if (-not $found) { $lines += "OLLAMA_MODELS_PATH=$DockerPath" }
+        if (-not $found) { $lines += "${EnvVarName}=$DockerPath" }
         $lines | Set-Content $EnvFilePath -Encoding UTF8
-        Write-Host "Updated OLLAMA_MODELS_PATH in .env: $DockerPath" -ForegroundColor Green
+        Write-Host "Updated ${EnvVarName} in .env: $DockerPath" -ForegroundColor Green
     } else {
-        "OLLAMA_MODELS_PATH=$DockerPath" | Set-Content $EnvFilePath -Encoding UTF8
-        Write-Host "Created .env with OLLAMA_MODELS_PATH=$DockerPath" -ForegroundColor Green
+        "${EnvVarName}=$DockerPath" | Set-Content $EnvFilePath -Encoding UTF8
+        Write-Host "Created .env with ${EnvVarName}=$DockerPath" -ForegroundColor Green
     }
 }
 
 # ============================================================
-# FUNCTION: Remove existing ollama_models Docker volume
+# FUNCTION: Remove existing Docker volume
 # so Docker re-creates it with the current device path from .env
 # ============================================================
-function Reset-OllamaVolume {
+function Reset-DockerVolume {
+    param(
+        [string]$VolumeSuffix
+    )
     # Docker Compose derives the project name from the folder name, lowercased,
     # stripping all non-alphanumeric characters (not replacing -- just removing).
     # e.g. "seneca-ai" -> "senecaai", so the volume becomes "senecaai_ollama_models".
     # We also try the raw lowercased folder name as a fallback (e.g. "seneca-ai_ollama_models").
     $folderName    = (Split-Path $ScriptDir -Leaf).ToLower()
     $projectName   = $folderName -replace '[^a-z0-9]', ''
-    $volumeName    = "${projectName}_ollama_models"
-    $volumeNameRaw = "${folderName}_ollama_models"
+    $volumeName    = "${projectName}_${VolumeSuffix}"
+    $volumeNameRaw = "${folderName}_${VolumeSuffix}"
 
-    Write-Host "Checking for existing Docker ollama_models volume..." -ForegroundColor Cyan
+    Write-Host "Checking for existing Docker ${VolumeSuffix} volume..." -ForegroundColor Cyan
 
     $allVolumes = docker volume ls --format "{{.Name}}"
     $found = $allVolumes | Where-Object { $_ -eq $volumeName -or $_ -eq $volumeNameRaw }
@@ -79,7 +87,7 @@ function Reset-OllamaVolume {
             }
         }
     } else {
-        Write-Host "No existing ollama_models volume found -- nothing to remove." -ForegroundColor Green
+        Write-Host "No existing ${VolumeSuffix} volume found -- nothing to remove." -ForegroundColor Green
     }
 }
 
@@ -181,8 +189,13 @@ if (Test-Path $MarkerFile) {
     Set-Location $ScriptDir
 
     # Ensure .env has the correct Windows path (in case it was missing or deleted)
-    Write-OllamaEnvVar -Path $OllamaPath -EnvFilePath $EnvFile
+    Write-EnvVar -EnvVarName "OLLAMA_MODELS_PATH" -Path $OllamaPath -EnvFilePath $EnvFile
     Write-Host "OLLAMA_MODELS_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
+
+    # Ensure .env has the correct Windows path for Mongo
+    Write-EnvVar -EnvVarName "MONGO_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
+    Write-Host "MONGO_DATA_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
+
 
     # Start Docker Engine service and wait until the daemon is ready
     Start-DockerEngine
@@ -190,7 +203,8 @@ if (Test-Path $MarkerFile) {
     # 7. Builds, (re)creates, starts, and attaches to containers for the service.
     Write-Host "--------------------------------------------------------" -ForegroundColor Cyan
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
-    Reset-OllamaVolume
+    Reset-DockerVolume -VolumeSuffix "ollama_models"
+    Reset-DockerVolume -VolumeSuffix "mongo_data"
     Invoke-Expression "docker compose $ComposeFiles up --build"
 
     # 8. Run containers in background
@@ -274,8 +288,20 @@ if (-not (Test-Path $OllamaPath)) {
     Write-Host "Directory already exists: $OllamaPath" -ForegroundColor Yellow
 }
 
+# New: Prepare directories for Mongo
+Write-Host "Preparing directories for Mongo..." -ForegroundColor Cyan
+if (-not (Test-Path $MongoPath)) {
+    New-Item -ItemType Directory -Path $MongoPath -Force | Out-Null
+    Write-Host "Created directory: $MongoPath" -ForegroundColor Green
+} else {
+    Write-Host "Directory already exists: $MongoPath" -ForegroundColor Yellow
+}
+
 # Write OLLAMA_MODELS_PATH to .env so docker-compose picks up the Windows path
-Write-OllamaEnvVar -Path $OllamaPath -EnvFilePath $EnvFile
+Write-EnvVar -EnvVarName "OLLAMA_MODELS_PATH" -Path $OllamaPath -EnvFilePath $EnvFile
+
+# New: Write MONGO_DATA_PATH to .env
+Write-EnvVar -EnvVarName "MONGO_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
 
 # 3. Check if Docker is already installed
 if (Get-Command docker -ErrorAction SilentlyContinue) {
@@ -289,9 +315,11 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     # Set working directory first so .env is always found by docker compose
     Set-Location $ScriptDir
     Write-Host "OLLAMA_MODELS_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
+    Write-Host "MONGO_DATA_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray # New: Mongo path resolution
     Start-DockerEngine
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
-    Reset-OllamaVolume
+    Reset-DockerVolume -VolumeSuffix "ollama_models"
+    Reset-DockerVolume -VolumeSuffix "mongo_data"
     Invoke-Expression "docker compose $ComposeFiles up --build"
     Invoke-Expression "docker compose $ComposeFiles up -d"
 
@@ -326,7 +354,7 @@ $Action      = New-ScheduledTaskAction `
                    -Argument "-ExecutionPolicy Bypass -NoProfile -WindowStyle Normal -File `"$ScriptPath`""
 $Trigger     = New-ScheduledTaskTrigger -AtLogOn
 $Principal   = New-ScheduledTaskPrincipal `
-                   -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+                   -UserId ([System.Security.Principal.WindowsPrincipal][System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
                    -RunLevel Highest
 $Settings    = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 
@@ -352,4 +380,4 @@ Write-Host " Please RESTART your computer now to complete the setup." -Foregroun
 Write-Host " The script will resume automatically after you log in." -ForegroundColor Yellow
 Write-Host "============================================================" -ForegroundColor Yellow
 
-Exit	
+Exit
