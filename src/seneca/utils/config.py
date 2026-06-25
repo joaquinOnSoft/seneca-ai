@@ -120,7 +120,7 @@ class AppConfig:
             try:
                 with open(self.seneca_ai_api_key_file, 'r') as f:
                     secret_value = f.read().strip()
-                    object.__setattr__(self, 'SENECA_AI_API_KEY', secret_value)
+                    object.__setattr__(self, 'seneca_ai_api_key', secret_value) # Corrected line
                 logger.info(f"SENECA_AI_API_KEY loaded from file: {self.seneca_ai_api_key_file}")
             except Exception as e:
                 logger.warning(f"Could not read SENECA_AI_API_KEY from file {self.seneca_ai_api_key_file}. Error: {e}")

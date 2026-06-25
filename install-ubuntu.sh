@@ -13,6 +13,7 @@ REAL_USER=${SUDO_USER:-$USER}
 echo "Preparing directories for Ollama..."#!/bin/bash
 
 sudo mkdir -p /opt/senecaai/volumes/ollama
+sudo mkdir -p /opt/senecaai/volumes/mongo
 sudo chown -R "$REAL_USER":"$REAL_USER" /opt/senecaai
 
 # 2. Check if Docker is already installed

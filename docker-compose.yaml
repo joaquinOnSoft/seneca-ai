@@ -21,6 +21,7 @@ services:
     build:
       context: ./docker/ollama
       dockerfile: Dockerfile
+      network: host
     container_name: ollama
     restart: unless-stopped
 
@@ -59,6 +60,43 @@ services:
       retries: 5
 
   # ────────────────────────────────────────────────────────────
+  #  mongo — MongoDB document store, port 27017
+  #  Used for SenecaAI persistence (sessions, transcripts, etc.)
+  # ────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7.0.37  # Stable and compatible version
+    container_name: mongo
+    restart: unless-stopped
+
+    environment:
+      # The official mongo image reads *_FILE variants via Docker secrets
+      MONGO_INITDB_ROOT_USERNAME_FILE: /run/secrets/mongo_root_username
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_root_password
+      MONGO_INITDB_DATABASE: "${MONGO_INITDB_DATABASE:-senecaai}"
+
+    ports:
+      - "27017:27017"
+
+    volumes:
+      # Database files persisted on the host — same bind-mount pattern as ollama_models
+      - mongodb_data:/data/db
+
+    networks:
+      - llm_net
+
+    secrets:
+      - mongo_root_username
+      - mongo_root_password
+
+    healthcheck:
+      # mongosh ships inside the official image since MongoDB 6
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # ────────────────────────────────────────────────────────────
   #  api - SenecaAI API server, port 1414.
   #  Python + ALSA + JACK + PyAudio
   # ────────────────────────────────────────────────────────────
@@ -66,13 +104,20 @@ services:
     build:
       context: . # Changed context to project root
       dockerfile: ./docker/api/Dockerfile # Specified full path to Dockerfile
+      network: host
     container_name: api
     restart: unless-stopped
 
     environment:
       # Ollama service URL reachable inside the Docker network
       OLLAMA_BASE_URL: "http://ollama:11434"
-      OLLAMA_MODEL: "hadad/LFM2.5-1.2B:Q4_K_M"
+      OLLAMA_MODEL: "${OLLAMA_AI_MODEL:-hadad/LFM2.5-1.2B:Q4_K_M}"
+      # Mongo connection — credentials read from the secret files below,
+      # not embedded in the URI. App code should read MONGO_ROOT_USERNAME_FILE /
+      # MONGO_ROOT_PASSWORD_FILE the same way it already reads SENECA_AI_API_KEY_FILE.
+      MONGO_URI: "mongodb://mongo:27017/${MONGO_INITDB_DATABASE:-senecaai}"
+      MONGO_ROOT_USERNAME_FILE: "/run/secrets/mongo_root_username"
+      MONGO_ROOT_PASSWORD_FILE: "/run/secrets/mongo_root_password"
       # Pass through whisper config from host .env to container
       WHISPER_MODEL_SIZE: "${WHISPER_MODEL_SIZE:-tiny}"
       WHISPER_DEVICE: "${WHISPER_DEVICE:-cpu}"
@@ -107,6 +152,8 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
 
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:1414/senecaai/v1/health"] # Cambiado a /seneca/v1/health
@@ -116,6 +163,8 @@ services:
       retries: 5
     secrets:
       - seneca_ai_api_key_secret
+      - mongo_root_username
+      - mongo_root_password
     storage_opt:
       size: 5G
 
@@ -132,6 +181,17 @@ volumes:
       #   sudo chown -R $USER:$USER /opt/senecaai
       device: "${OLLAMA_MODELS_PATH:-/opt/senecaai/volumes/ollama}"
 
+  mongodb_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      # Host path where MongoDB data files are persisted.
+      # Create it before the first `docker compose up`:
+      #   sudo mkdir -p /opt/senecaai/volumes/mongodb
+      #   sudo chown -R $USER:$USER /opt/senecaai
+      device: "${MONGODB_DATA_PATH:-/opt/senecaai/volumes/mongo}"
+
 # ── Internal network ───────────────────────────────────────────
 networks:
   llm_net:
@@ -141,3 +201,7 @@ networks:
 secrets:
   seneca_ai_api_key_secret:
     file: docker/api/seneca_ai_api_key.txt
+  mongo_root_username:
+    file: docker/mongo/mongo_root_username.txt
+  mongo_root_password:
+    file: docker/mongo/mongo_root_password.txt

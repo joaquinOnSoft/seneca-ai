@@ -12,19 +12,22 @@ ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
 # ── System packages ────────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    # ALSA Advanced Linux Sound Architecture \
+# NOTE: alsa-base was removed in Debian Bookworm (absorbed into other pkgs).
+# Packages installed:
+#   ALSA (Advanced Linux Sound Architecture): alsa-utils, alsa-tools, libasound2-dev, libasound2-plugins
+#   JACK Audio Connection Kit: jackd2, libjack-jackd2-dev
+#   PortAudio (required by PyAudio): portaudio19-dev
+#   C extension build tools (PyAudio compiles a native extension): build-essential, pkg-config
+#   Utilities: curl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
     alsa-utils \
-    alsa-oss \
     alsa-tools \
     libasound2-dev \
     libasound2-plugins \
-    # JACK Audio Connection Kit
     jackd2 \
     libjack-jackd2-dev \
-    # PortAudio (required by PyAudio)
     portaudio19-dev \
-    # C extension build tools (PyAudio compiles a native extension)
     build-essential \
     pkg-config \
     curl \
