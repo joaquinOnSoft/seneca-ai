@@ -32,6 +32,7 @@ dependencies = [
     "python-json-logger", # Added for structured logging
     "waitress",
     "Flask-Limiter>=2.0.0", # Added for rate limiting
+    "pymongo" # Added for MongoDB connection
 ]
 
 [project.optional-dependencies]

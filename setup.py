@@ -41,6 +41,7 @@ setup(
         "python-json-logger",
         "waitress",
         "Flask-Limiter>=2.0.0", # Added for rate limiting
+        "pymongo" # Added for MongoDB connection
     ],
     entry_points={
         "console_scripts": [
