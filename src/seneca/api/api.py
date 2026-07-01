@@ -96,36 +96,18 @@ logging.getLogger().addFilter(RequestIdFilter())
 logging.getLogger().setLevel(logging.INFO)
 
 # --- MongoDB Configuration ---
-mongo_client = None
-db = None
-conversations_collection = None
+from src.seneca.api.database import MongoDatabase
 
+db_client = MongoDatabase(config.mongodb_uri)
 
 # Defer MongoDB connection to a function to be called within app context or mocked
 def init_mongodb():
-    global mongo_client, db, conversations_collection
     # Only attempt to connect if not already connected and not mocked
-    # Check if conversations_collection is already a MagicMock (from tests)
-    if isinstance(conversations_collection, MagicMock):
+    if isinstance(db_client, MagicMock) or getattr(db_client, '_is_mock', False):
         return
 
-    # If it's None or a real object, proceed with connection
-    if conversations_collection is not None:  # Already connected to a real DB
-        return
-
-    try:
-        mongo_client = MongoClient(config.mongodb_uri)
-        db = mongo_client.get_database()
-        conversations_collection = db.conversations
-        api.logger.info("MongoDB connected successfully.")
-    except ConnectionFailure as e:
-        api.logger.error(f"Failed to connect to MongoDB: {e}", exc_info=True)
-        # Important: if connection fails, set conversations_collection to None
-        # so subsequent calls know it's not available.
-        conversations_collection = None
-    except Exception as e:
-        api.logger.error(f"An unexpected error occurred during MongoDB connection: {e}", exc_info=True)
-        conversations_collection = None
+    if not db_client.is_connected():
+        db_client.connect()
 
 
 # Call init_mongodb before each request
@@ -565,8 +547,8 @@ def get_conversations():
         description: "Internal Server Error: An unexpected error occurred."
     """
     api.logger.info(f"Request to get conversations for user: {g.user_id}")
-    if conversations_collection is None:
-        api.logger.error("MongoDB conversations collection is not initialized.")
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
         return jsonify({"error": "Database service unavailable."}), 500
 
     try:
@@ -579,9 +561,7 @@ def get_conversations():
         skip = (num_page - 1) * conv_per_page
         limit = conv_per_page
 
-        conversations = list(conversations_collection.find(
-            {"user_id": g.user_id}
-        ).sort("created_at", -1).skip(skip).limit(limit))
+        conversations = db_client.get_conversations(g.user_id, skip=skip, limit=limit)
 
         api.logger.info(f"Found {len(conversations)} conversations for user {g.user_id} on page {num_page}.")
         # Use json.dumps with custom encoder and then Response to ensure correct serialization
@@ -629,8 +609,8 @@ def get_conversation_by_id(_id):
         description: "Internal Server Error: An unexpected error occurred."
     """
     api.logger.info(f"Request to get conversation with _id: {_id} for user: {g.user_id}")
-    if conversations_collection is None:
-        api.logger.error("MongoDB conversations collection is not initialized.")
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
         return jsonify({"error": "Database service unavailable."}), 500
 
     try:
@@ -638,13 +618,11 @@ def get_conversation_by_id(_id):
             api.logger.warning(f"Invalid ObjectId format for _id: {_id}")
             return jsonify({"error": "Invalid conversation ID format."}), 400
 
-        conversation = conversations_collection.find_one(
-            {"_id": ObjectId(_id), "user_id": g.user_id}
-        )
+        conversation = db_client.get_conversation_by_id(_id, user_id=g.user_id)
 
         if not conversation:
             # Check if it exists but belongs to another user
-            if conversations_collection.find_one({"_id": ObjectId(_id)}):
+            if db_client.check_conversation_exists(_id):
                 api.logger.warning(f"User {g.user_id} attempted to access conversation {_id} owned by another user.")
                 return jsonify({"error": "Forbidden: User does not have access to this conversation."}), 403
             api.logger.info(f"Conversation with _id: {_id} not found for user: {g.user_id}")
@@ -695,8 +673,8 @@ def create_conversation():
     """
     api.logger.info(f"Request to create new conversation for user: {g.user_id}")
 
-    if conversations_collection is None:
-        api.logger.error("MongoDB conversations collection is not initialized.")
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
         return jsonify({"error": "Database service unavailable."}), 500
 
     try:
@@ -714,15 +692,7 @@ def create_conversation():
         if not is_valid_messages:
             return jsonify({"error": error_msg}), 400
 
-        new_conversation = {
-            "user_id": g.user_id,
-            "title": title,
-            "created_at": datetime.now(timezone.utc),  # Use timezone-aware datetime
-            "messages": messages
-        }
-
-        result = conversations_collection.insert_one(new_conversation)
-        new_conversation['_id'] = result.inserted_id
+        new_conversation = db_client.create_conversation(g.user_id, title, messages)
 
         location_header = f"{request.url}/{new_conversation['_id']}"
         api.logger.info(f"Conversation created successfully with _id: {new_conversation['_id']} for user {g.user_id}.")
@@ -774,8 +744,8 @@ def update_conversation(_id):
         description: "Internal Server Error: An unexpected error occurred."
     """
     api.logger.info(f"Request to update conversation with _id: {_id} for user: {g.user_id}")
-    if conversations_collection is None:
-        api.logger.error("MongoDB conversations collection is not initialized.")
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
         return jsonify({"error": "Database service unavailable."}), 500
 
     try:
@@ -802,21 +772,18 @@ def update_conversation(_id):
         if not update_fields:
             return jsonify({"error": "No valid fields to update provided (e.g., 'title', 'messages')."}), 400
 
-        result = conversations_collection.update_one(
-            {"_id": ObjectId(_id), "user_id": g.user_id},
-            {"$set": update_fields}
-        )
+        updated = db_client.update_conversation(_id, g.user_id, update_fields)
 
-        if result.matched_count == 0:
+        if not updated:
             # Check if it exists but belongs to another user
-            if conversations_collection.find_one({"_id": ObjectId(_id)}):
+            if db_client.check_conversation_exists(_id):
                 api.logger.warning(f"User {g.user_id} attempted to update conversation {_id} owned by another user.")
                 return jsonify({"error": "Forbidden: User does not have access to modify this conversation."}), 403
 
             api.logger.info(f"Conversation with _id: {_id} not found for user: {g.user_id}")
             return jsonify({"error": "Conversation not found."}), 404
 
-        updated_conversation = conversations_collection.find_one({"_id": ObjectId(_id)})
+        updated_conversation = db_client.get_conversation_by_id(_id)
         api.logger.info(f"Conversation {_id} updated successfully for user {g.user_id}.")
         # Use json.dumps with custom encoder and then Response to ensure correct serialization
         return Response(json.dumps(_prepare_response_data(updated_conversation), cls=MongoJsonEncoder),

@@ -504,7 +504,7 @@ def client():
         # Patch MongoClient to prevent actual connection attempts and mock the collection
         with patch('src.seneca.api.api.MongoClient') as MockMongoClient:
             mock_mongo_instance = MagicMock()
-            # The actual collection will be mocked by mock_conversations_collection fixture
+            # The actual collection will be mocked by mock_db_client fixture
             mock_mongo_instance.get_database.return_value.conversations = MagicMock()
             MockMongoClient.return_value = mock_mongo_instance
 
@@ -547,110 +547,89 @@ def delay_to_avoid_too_many_request_per_second():
 
 
 @pytest.fixture
-def mock_conversations_collection():
-    """
-    Fixture to mock the MongoDB conversations collection using an in-memory dictionary.
-    This provides more realistic behavior for find, find_one, insert_one, update_one.
-    """
+def mock_db_client():
     _db_store = {
         ObjectId(SAMPLE_CONVERSATION_1["_id"]): SAMPLE_CONVERSATION_1.copy(),
         ObjectId(SAMPLE_CONVERSATION_2["_id"]): SAMPLE_CONVERSATION_2.copy(),
         ObjectId(SAMPLE_CONVERSATION_OTHER_USER["_id"]): SAMPLE_CONVERSATION_OTHER_USER.copy(),
     }
 
-    class MockCursor:
-        def __init__(self, data):
-            self._data = sorted(data, key=lambda x: x["created_at"], reverse=True)
-            self._skip = 0
-            self._limit = len(self._data)
+    class MockDatabase:
+        def is_connected(self):
+            return True
 
-        def sort(self, key, direction):
-            # For simplicity, we only sort by created_at desc
-            if key == "created_at" and direction == -1:
-                self._data.sort(key=lambda x: x["created_at"], reverse=True)
-            return self
+        def connect(self):
+            return True
 
-        def skip(self, n):
-            self._skip = n
-            return self
+        def get_conversations(self, user_id, skip=0, limit=20):
+            filtered_data = [doc.copy() for doc in _db_store.values() if doc.get("user_id") == user_id]
+            filtered_data.sort(key=lambda x: x["created_at"], reverse=True)
+            return filtered_data[skip : skip + limit]
 
-        def limit(self, n):
-            self._limit = n
-            return self
-
-        def __iter__(self):
-            return iter(self._data[self._skip: self._skip + self._limit])
-
-        def __len__(self):
-            return len(self._data[self._skip: self._skip + self._limit])
-
-    class MockCollection:
-        def find(self, query):
-            # Filter by user_id
-            user_id = query.get("user_id")
-            if user_id:
-                filtered_data = [doc.copy() for doc in _db_store.values() if doc.get("user_id") == user_id]
-            else:
-                filtered_data = [doc.copy() for doc in _db_store.values()]
-            return MockCursor(filtered_data)
-
-        def find_one(self, query):
-            _id = query.get("_id")
-            user_id = query.get("user_id")
-
-            if _id in _db_store:
-                doc = _db_store[_id].copy()
+        def get_conversation_by_id(self, conversation_id, user_id=None):
+            if isinstance(conversation_id, str):
+                try:
+                    conversation_id = ObjectId(conversation_id)
+                except:
+                    pass
+            if conversation_id in _db_store:
+                doc = _db_store[conversation_id].copy()
                 if user_id is None or doc.get("user_id") == user_id:
                     return doc
             return None
 
-        def insert_one(self, document):
+        def check_conversation_exists(self, conversation_id):
+            if isinstance(conversation_id, str):
+                try:
+                    conversation_id = ObjectId(conversation_id)
+                except:
+                    pass
+            return conversation_id in _db_store
+
+        def create_conversation(self, user_id, title, messages):
             new_id = ObjectId()
-            document["_id"] = new_id
-            _db_store[new_id] = document
-            mock_insert_result = MagicMock()
-            mock_insert_result.inserted_id = new_id
-            return mock_insert_result
+            doc = {
+                "_id": new_id,
+                "user_id": user_id,
+                "title": title,
+                "created_at": TEST_DATETIME_NEW_MSG,  # we use TEST_DATETIME_NEW_MSG for consistency
+                "messages": messages
+            }
+            _db_store[new_id] = doc
+            return doc
 
-        def update_one(self, query, update):
-            _id = query.get("_id")
-            user_id = query.get("user_id")
-
-            matched_count = 0
-            modified_count = 0
-
-            if _id in _db_store:
-                doc = _db_store[_id]
+        def update_conversation(self, conversation_id, user_id, update_fields):
+            if isinstance(conversation_id, str):
+                try:
+                    conversation_id = ObjectId(conversation_id)
+                except:
+                    pass
+            if conversation_id in _db_store:
+                doc = _db_store[conversation_id]
                 if doc.get("user_id") == user_id:
-                    matched_count = 1
-                    for op, fields in update.items():
-                        if op == "$set":
-                            for key, value in fields.items():
-                                if doc.get(key) != value:
-                                    doc[key] = value
-                                    modified_count = 1  # Mark as modified if any field changes
+                    for key, value in update_fields.items():
+                        doc[key] = value
+                    return True
+            return False
 
-            mock_update_result = MagicMock()
-            mock_update_result.matched_count = matched_count
-            mock_update_result.modified_count = modified_count
-            return mock_update_result
-
-        # Expose _db_store for direct manipulation in specific tests if needed
-        # but generally, tests should interact via find/find_one/insert_one/update_one
         @property
         def _db_store_accessor(self):
             return _db_store
 
-    mock_instance = MockCollection()
-    mock_collection = MagicMock()
-    mock_collection.find.side_effect = mock_instance.find
-    mock_collection.find_one.side_effect = mock_instance.find_one
-    mock_collection.insert_one.side_effect = mock_instance.insert_one
-    mock_collection.update_one.side_effect = mock_instance.update_one
-    mock_collection._db_store_accessor = mock_instance._db_store_accessor
+    mock_instance = MockDatabase()
+    mock_db = MagicMock()
+    mock_db.is_connected.side_effect = mock_instance.is_connected
+    mock_db.connect.side_effect = mock_instance.connect
+    mock_db.get_conversations.side_effect = mock_instance.get_conversations
+    mock_db.get_conversation_by_id.side_effect = mock_instance.get_conversation_by_id
+    mock_db.check_conversation_exists.side_effect = mock_instance.check_conversation_exists
+    mock_db.create_conversation.side_effect = mock_instance.create_conversation
+    mock_db.update_conversation.side_effect = mock_instance.update_conversation
+    mock_db._db_store_accessor = mock_instance._db_store_accessor
+    mock_db._is_mock = True
 
-    with patch('src.seneca.api.api.conversations_collection', mock_collection):
-        yield mock_collection
+    with patch('src.seneca.api.api.db_client', mock_db):
+        yield mock_db
 
 
 # --- Tests for /senecaai/v1/stt ---
@@ -896,12 +875,12 @@ def test_rate_limiting(client, mock_whisper_model_fixture, mock_temp_file_fixtur
 
 # --- Tests for Conversation Management Endpoints ---
 
-def test_get_conversations_success(client, mock_conversations_collection):
+def test_get_conversations_success(client, mock_db_client):
     """Tests successful retrieval of conversations for the authenticated user."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     # The mock collection is initialized with SAMPLE_CONVERSATION_1 and SAMPLE_CONVERSATION_2
     # We need to ensure the mock's find method returns a cursor that iterates over these.
-    # The mock_conversations_collection fixture already sets this up.
+    # The mock_db_client fixture already sets this up.
 
     response = client.get(API_METHOD_CONVERSATIONS, headers=headers)
 
@@ -911,18 +890,18 @@ def test_get_conversations_success(client, mock_conversations_collection):
         conversation_to_json_compatible(SAMPLE_CONVERSATION_2)
     ]
     assert json.loads(response.data) == expected_conversations
-    mock_conversations_collection.find.assert_called_once_with({"user_id": TEST_USER_ID})
+    mock_db_client.get_conversations.assert_called_once_with(TEST_USER_ID, skip=0, limit=20)
 
 
-def test_get_conversations_pagination(client, mock_conversations_collection):
+def test_get_conversations_pagination(client, mock_db_client):
     """Tests pagination parameters for conversations."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     # Simulate the mock collection returning only the second conversation for page 2
     # Reset the mock's internal store for this specific test to control pagination
-    mock_conversations_collection._db_store_accessor.clear()
-    mock_conversations_collection._db_store_accessor[
+    mock_db_client._db_store_accessor.clear()
+    mock_db_client._db_store_accessor[
         ObjectId(SAMPLE_CONVERSATION_1["_id"])] = SAMPLE_CONVERSATION_1.copy()
-    mock_conversations_collection._db_store_accessor[
+    mock_db_client._db_store_accessor[
         ObjectId(SAMPLE_CONVERSATION_2["_id"])] = SAMPLE_CONVERSATION_2.copy()
 
     response = client.get(f"{API_METHOD_CONVERSATIONS}?convPerPage=1&numPage=2", headers=headers)
@@ -931,10 +910,10 @@ def test_get_conversations_pagination(client, mock_conversations_collection):
 
     expected_conversations = [conversation_to_json_compatible(SAMPLE_CONVERSATION_2)]
     assert json.loads(response.data) == expected_conversations
-    mock_conversations_collection.find.assert_called_once_with({"user_id": TEST_USER_ID})
+    mock_db_client.get_conversations.assert_called_once_with(TEST_USER_ID, skip=1, limit=1)
 
 
-def test_get_conversations_invalid_pagination(client, mock_conversations_collection):
+def test_get_conversations_invalid_pagination(client, mock_db_client):
     """Tests invalid pagination parameters."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     response = client.get(f"{API_METHOD_CONVERSATIONS}?convPerPage=-1&numPage=abc", headers=headers)
@@ -943,39 +922,40 @@ def test_get_conversations_invalid_pagination(client, mock_conversations_collect
         "error"]
 
 
-def test_get_conversations_db_error(client, mock_conversations_collection):
+def test_get_conversations_db_error(client, mock_db_client):
     """Tests database error during conversation retrieval."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
-    mock_conversations_collection.find.side_effect = PyMongoError("DB connection lost")
+    mock_db_client.get_conversations.side_effect = PyMongoError("DB connection lost")
     response = client.get(API_METHOD_CONVERSATIONS, headers=headers)
     assert response.status_code == 500
     assert "Database error" in json.loads(response.data)["error"]
 
 
-def test_get_conversation_by_id_success(client, mock_conversations_collection):
+def test_get_conversation_by_id_success(client, mock_db_client):
     """Tests successful retrieval of a specific conversation."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
-    # The mock_conversations_collection.find_one.side_effect is already set up in the fixture
+    # The mock_db_client.find_one.side_effect is already set up in the fixture
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", headers=headers)
 
     assert response.status_code == 200
     assert json.loads(response.data) == conversation_to_json_compatible(SAMPLE_CONVERSATION_1)
-    mock_conversations_collection.find_one.assert_called_once_with(
-        {"_id": ObjectId(TEST_CONVERSATION_ID_1), "user_id": TEST_USER_ID}
-    )
+    mock_db_client.get_conversation_by_id.assert_called_once_with(TEST_CONVERSATION_ID_1, user_id=TEST_USER_ID)
 
 
-def test_get_conversation_by_id_not_found(client, mock_conversations_collection):
+def test_get_conversation_by_id_not_found(client, mock_db_client):
     """Tests retrieval of a non-existent conversation."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
-    # Ensure find_one returns None for the specific ID and user
-    mock_conversations_collection.find_one.side_effect = lambda query: None  # Reset side_effect for this test
+    # Ensure get_conversation_by_id returns None for the specific ID and user
+    mock_db_client.get_conversation_by_id.side_effect = None
+    mock_db_client.get_conversation_by_id.return_value = None
+    mock_db_client.check_conversation_exists.side_effect = None
+    mock_db_client.check_conversation_exists.return_value = False
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", headers=headers)
     assert response.status_code == 404
     assert "Conversation not found" in json.loads(response.data)["error"]
 
 
-def test_get_conversation_by_id_invalid_id_format(client, mock_conversations_collection):
+def test_get_conversation_by_id_invalid_id_format(client, mock_db_client):
     """Tests retrieval with an invalid ObjectId format."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     # Ensure init_mongodb is called and conversations_collection is mocked
@@ -985,29 +965,29 @@ def test_get_conversation_by_id_invalid_id_format(client, mock_conversations_col
     assert "Invalid conversation ID format" in json.loads(response.data)["error"]
 
 
-def test_get_conversation_by_id_forbidden(client, mock_conversations_collection):
+def test_get_conversation_by_id_forbidden(client, mock_db_client):
     """Tests retrieval of a conversation owned by another user."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
 
     # Ensure the conversation exists but belongs to 'other_user_456'
     forbidden_conv_id = ObjectId(TEST_CONVERSATION_ID_OTHER_USER)
-    mock_conversations_collection._db_store_accessor[forbidden_conv_id] = SAMPLE_CONVERSATION_OTHER_USER.copy()
+    mock_db_client._db_store_accessor[forbidden_conv_id] = SAMPLE_CONVERSATION_OTHER_USER.copy()
 
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_OTHER_USER}", headers=headers)
     assert response.status_code == 403
     assert "Forbidden: User does not have access to this conversation." in json.loads(response.data)["error"]
 
 
-def test_get_conversation_by_id_db_error(client, mock_conversations_collection):
+def test_get_conversation_by_id_db_error(client, mock_db_client):
     """Tests database error during specific conversation retrieval."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
-    mock_conversations_collection.find_one.side_effect = PyMongoError("DB connection lost")
+    mock_db_client.get_conversation_by_id.side_effect = PyMongoError("DB connection lost")
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", headers=headers)
     assert response.status_code == 500
     assert "Database error" in json.loads(response.data)["error"]
 
 
-def test_create_conversation_success(client, mock_conversations_collection):
+def test_create_conversation_success(client, mock_db_client):
     """Tests successful creation of a new conversation."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'Content-Type': 'application/json'}
     new_conversation_data = {
@@ -1029,12 +1009,7 @@ def test_create_conversation_success(client, mock_conversations_collection):
     assert "Location" in response.headers
     assert response.headers["Location"] == f"http://localhost{API_METHOD_CONVERSATIONS}/{response_data['_id']}"
 
-    mock_conversations_collection.insert_one.assert_called_once()
-    inserted_doc = mock_conversations_collection.insert_one.call_args[0][0]
-    assert inserted_doc["user_id"] == TEST_USER_ID
-    assert inserted_doc["title"] == new_conversation_data["title"]
-    assert inserted_doc["messages"] == new_conversation_data["messages"]
-    assert isinstance(inserted_doc["created_at"], datetime)
+    mock_db_client.create_conversation.assert_called_once_with(TEST_USER_ID, new_conversation_data["title"], new_conversation_data["messages"])
 
 
 def test_create_conversation_invalid_data(client):
@@ -1077,7 +1052,7 @@ def test_create_conversation_invalid_data(client):
     assert "Message role must be 'user' or 'assistant'." in json.loads(response.data)["error"]
 
 
-def test_create_conversation_db_error(client, mock_conversations_collection):
+def test_create_conversation_db_error(client, mock_db_client):
     """Tests database error during conversation creation."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'Content-Type': 'application/json'}
     new_conversation_data = {
@@ -1087,13 +1062,13 @@ def test_create_conversation_db_error(client, mock_conversations_collection):
              "timestamp": TEST_DATETIME_NEW_MSG.isoformat().replace('+00:00', 'Z')}
         ]
     }
-    mock_conversations_collection.insert_one.side_effect = PyMongoError("DB write error")
+    mock_db_client.create_conversation.side_effect = PyMongoError("DB write error")
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps(new_conversation_data), headers=headers)
     assert response.status_code == 500
     assert "Database error" in json.loads(response.data)["error"]
 
 
-def test_update_conversation_success(client, mock_conversations_collection):
+def test_update_conversation_success(client, mock_db_client):
     """Tests successful partial update of a conversation."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'Content-Type': 'application/json'}
     update_data = {
@@ -1106,7 +1081,7 @@ def test_update_conversation_success(client, mock_conversations_collection):
 
     # Ensure the conversation exists in the mock store before the update
     original_conv_id = ObjectId(TEST_CONVERSATION_ID_1)
-    mock_conversations_collection._db_store_accessor[original_conv_id] = SAMPLE_CONVERSATION_1.copy()
+    mock_db_client._db_store_accessor[original_conv_id] = SAMPLE_CONVERSATION_1.copy()
 
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", data=json.dumps(update_data),
                             headers=headers)
@@ -1117,26 +1092,23 @@ def test_update_conversation_success(client, mock_conversations_collection):
     assert response_data["title"] == update_data["title"]
     assert response_data["messages"] == update_data["messages"]
 
-    mock_conversations_collection.update_one.assert_called_once_with(
-        {"_id": original_conv_id, "user_id": TEST_USER_ID},
-        {"$set": update_data}
-    )
+    mock_db_client.update_conversation.assert_called_once_with(TEST_CONVERSATION_ID_1, TEST_USER_ID, update_data)
 
     # Verify the document in the mock store was actually updated
-    updated_doc_in_store = mock_conversations_collection.find_one({"_id": original_conv_id, "user_id": TEST_USER_ID})
+    updated_doc_in_store = mock_db_client.get_conversation_by_id(TEST_CONVERSATION_ID_1, user_id=TEST_USER_ID)
     assert updated_doc_in_store["title"] == update_data["title"]
     assert updated_doc_in_store["messages"] == update_data["messages"]
 
 
-def test_update_conversation_not_found(client, mock_conversations_collection):
+def test_update_conversation_not_found(client, mock_db_client):
     """Tests updating a non-existent conversation."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'Content-Type': 'application/json'}
     update_data = {"title": "Non Existent"}
 
     # Ensure the conversation is NOT in the mock store for this test
     non_existent_id = ObjectId()
-    if non_existent_id in mock_conversations_collection._db_store_accessor:
-        del mock_conversations_collection._db_store_accessor[non_existent_id]
+    if non_existent_id in mock_db_client._db_store_accessor:
+        del mock_db_client._db_store_accessor[non_existent_id]
 
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{str(non_existent_id)}", data=json.dumps(update_data),
                             headers=headers)
@@ -1144,7 +1116,7 @@ def test_update_conversation_not_found(client, mock_conversations_collection):
     assert "Conversation not found" in json.loads(response.data)["error"]
 
 
-def test_update_conversation_invalid_id_format(client, mock_conversations_collection):
+def test_update_conversation_invalid_id_format(client, mock_db_client):
     """Tests updating with an invalid ObjectId format."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'Content-Type': 'application/json'}
     update_data = {"title": "Invalid ID"}
@@ -1154,14 +1126,14 @@ def test_update_conversation_invalid_id_format(client, mock_conversations_collec
     assert "Invalid conversation ID format" in json.loads(response.data)["error"]
 
 
-def test_update_conversation_forbidden(client, mock_conversations_collection):
+def test_update_conversation_forbidden(client, mock_db_client):
     """Tests updating a conversation owned by another user."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'Content-Type': 'application/json'}
     update_data = {"title": "Forbidden Update"}
 
     # Ensure the conversation exists but belongs to 'other_user_456'
     forbidden_conv_id = ObjectId(TEST_CONVERSATION_ID_OTHER_USER)
-    mock_conversations_collection._db_store_accessor[forbidden_conv_id] = SAMPLE_CONVERSATION_OTHER_USER.copy()
+    mock_db_client._db_store_accessor[forbidden_conv_id] = SAMPLE_CONVERSATION_OTHER_USER.copy()
 
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_OTHER_USER}",
                             data=json.dumps(update_data), headers=headers)
@@ -1209,11 +1181,11 @@ def test_update_conversation_invalid_data(client):
     assert "Message role must be 'user' or 'assistant'." in json.loads(response.data)["error"]
 
 
-def test_update_conversation_db_error(client, mock_conversations_collection):
+def test_update_conversation_db_error(client, mock_db_client):
     """Tests database error during conversation update."""
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'Content-Type': 'application/json'}
     update_data = {"title": "Error Update"}
-    mock_conversations_collection.update_one.side_effect = PyMongoError("DB update error")
+    mock_db_client.update_conversation.side_effect = PyMongoError("DB update error")
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", data=json.dumps(update_data),
                             headers=headers)
     assert response.status_code == 500

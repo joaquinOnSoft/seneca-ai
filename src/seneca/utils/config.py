@@ -99,6 +99,11 @@ class AppConfig:
         default_factory=lambda: os.getenv("SENECA_AI_API_KEY_FILE", "")
     )
 
+    # MongoDB URI
+    mongodb_uri: str = field(
+        default_factory=lambda: os.getenv("MONGODB_URI", "mongodb://localhost:27017/seneca_db")
+    )
+
     def __post_init__(self):
         # Basic validation for stt_backend
         if self.stt_backend not in _ALLOWED_STT_BACKENDS:            
