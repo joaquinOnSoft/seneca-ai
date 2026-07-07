@@ -3,9 +3,14 @@ import os
 import sys
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta # Import datetime, timezone, timedelta directly
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock # Keep for testing context, though not directly used in prod code
+
+import jwt # Import PyJWT
+from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401 — "Applies the patch via side effect
+# noinspection PyUnresolvedReferences
+from passlib.hash import bcrypt
 
 import whisper
 from faster_whisper import WhisperModel
@@ -13,14 +18,12 @@ from flasgger import Swagger
 from flask import Flask, request, jsonify, g, has_app_context, Response
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from pymongo.errors import PyMongoError # Keep PyMongoError for specific error handling
+from bson.objectid import ObjectId # Import ObjectId
 from pythonjsonlogger.json import JsonFormatter
 
-# --- MongoDB Imports ---
-from pymongo import MongoClient
-from bson.objectid import ObjectId
-from pymongo.errors import ConnectionFailure, PyMongoError
-
 from seneca.utils.config import config
+from seneca.api.database import MongoDatabase # Import the new database class
 
 
 # --- Structured Logging Configuration ---
@@ -96,14 +99,13 @@ logging.getLogger().addFilter(RequestIdFilter())
 logging.getLogger().setLevel(logging.INFO)
 
 # --- MongoDB Configuration ---
-from src.seneca.api.database import MongoDatabase
-
 db_client = MongoDatabase(config.mongodb_uri)
 
 # Defer MongoDB connection to a function to be called within app context or mocked
 def init_mongodb():
     # Only attempt to connect if not already connected and not mocked
-    if isinstance(db_client, MagicMock) or getattr(db_client, '_is_mock', False):
+    # We check for a specific attribute '_is_mock' that our MongoDatabase mock will have
+    if getattr(db_client, '_is_mock', False):
         return
 
     if not db_client.is_connected():
@@ -111,7 +113,7 @@ def init_mongodb():
 
 
 # Call init_mongodb before each request
-@api.before_request  # Changed from before_first_request
+@api.before_request
 def setup_mongodb():
     init_mongodb()
 
@@ -121,15 +123,12 @@ class MongoJsonEncoder(json.JSONEncoder):  # Inherit from standard json.JSONEnco
     def default(self, obj):
         if isinstance(obj, ObjectId):
             return str(obj)
-        if isinstance(obj, datetime):
+        if isinstance(obj, datetime): # Use datetime
             # Ensure datetime objects are timezone-aware for ISO format, or convert to UTC
             if obj.tzinfo is None:
-                return obj.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')
+                return obj.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z') # Use timezone
             return obj.isoformat().replace('+00:00', 'Z')
         return json.JSONEncoder.default(self, obj)  # Call parent's default
-
-
-api.json_encoder = MongoJsonEncoder
 
 
 # Helper function to recursively convert ObjectId and datetime objects in a document
@@ -141,9 +140,9 @@ def _prepare_response_data(data):
         for key, value in data.items():
             if isinstance(value, ObjectId):
                 processed_data[key] = str(value)
-            elif isinstance(value, datetime):
+            elif isinstance(value, datetime): # Use datetime
                 if value.tzinfo is None:
-                    processed_data[key] = value.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z')
+                    processed_data[key] = value.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z') # Use timezone
                 else:
                     processed_data[key] = value.isoformat().replace('+00:00', 'Z')
             elif isinstance(value, (dict, list)):
@@ -152,6 +151,57 @@ def _prepare_response_data(data):
                 processed_data[key] = value
         return processed_data
     return data
+
+
+# Helper function to validate message structure (moved here for scope)
+def validate_message_structure(messages):
+    """Helper function to validate the structure of messages."""
+    if not isinstance(messages, list):
+        return False, "Messages must be a list."
+    for msg in messages:
+        if not isinstance(msg, dict) or not all(k in msg for k in ['role', 'content', 'timestamp']):
+            return False, "Each message must have 'role', 'content', and 'timestamp'."
+        if not isinstance(msg['role'], str) or msg['role'] not in ["user", "assistant"]:
+            return False, "Message role must be 'user' or 'assistant'."
+        if not isinstance(msg['content'], str):
+            return False, "Message content must be a string."
+        if not isinstance(msg['timestamp'], str):
+            return False, "Message timestamp must be a string."
+        try:
+            # Attempt to parse to validate format
+            datetime.fromisoformat(msg['timestamp'].replace('Z', '+00:00')) # Use datetime
+        except ValueError:
+            return False, "Message timestamp must be in ISO 8601 format."
+    return True, None
+
+
+# --- JWT and Refresh Token Utilities ---
+def generate_jwt(user_id, user_name, expires_in_seconds=config.jwt_access_token_expires_in):
+    payload = {
+        "user_id": user_id,
+        "user_name": user_name,
+        "exp": datetime.now(timezone.utc) + timedelta(seconds=expires_in_seconds), # Use datetime, timezone, timedelta
+        "iat": datetime.now(timezone.utc) # Use datetime, timezone
+    }
+    return jwt.encode(payload, config.jwt_secret_key, algorithm="HS256")
+
+def decode_jwt(token):
+    try:
+        return jwt.decode(token, config.jwt_secret_key, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        return {"error": "Token has expired"}
+    except jwt.InvalidTokenError:
+        return {"error": "Invalid token"}
+
+def generate_refresh_token():
+    return str(uuid.uuid4()) # Simple UUID for refresh token
+
+
+def hash_refresh_token(token):
+    return bcrypt.hash(token)
+
+def verify_refresh_token(token, hashed_token):
+    return bcrypt.verify(token, hashed_token)
 
 
 # --- Swagger Configuration ---
@@ -174,7 +224,13 @@ swagger_config = {
             "type": "apiKey",
             "name": "X-SENECA-AI-API-KEY",
             "in": "header",
-            "description": "API Key required for authentication"
+            "description": "API Key required for authentication (for specific integrations)"
+        },
+        "BearerAuth": { # New security definition for JWT
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "JWT Access Token (Bearer <token>)"
         }
     },
     "definitions": {
@@ -227,6 +283,33 @@ swagger_config = {
                     "description": "New list of messages to replace or append (optional). If provided, it will replace the existing messages array."
                 }
             }
+        },
+        "AuthLoginSchema": { # New schema for login request body
+            "type": "object",
+            "properties": {
+                "username": {"type": "string", "description": "User's username"},
+                "password": {"type": "string", "description": "User's password"}
+            },
+            "required": ["username", "password"]
+        },
+        "AuthTokensSchema": { # New schema for login/refresh response
+            "type": "object",
+            "properties": {
+                "access_token": {"type": "string", "description": "JWT Access Token"},
+                "refresh_token": {"type": "string", "description": "Refresh Token (use for /auth/refresh)"},
+                "token_type": {"type": "string", "enum": ["Bearer"], "default": "Bearer"},
+                "expires_in": {"type": "integer", "description": "Access Token expiration time in seconds"}
+            },
+            "required": ["access_token", "token_type", "expires_in"]
+        },
+        "RefreshTokenResponseSchema": { # New schema for refresh response
+            "type": "object",
+            "properties": {
+                "access_token": {"type": "string", "description": "New JWT Access Token"},
+                "token_type": {"type": "string", "enum": ["Bearer"], "default": "Bearer"},
+                "expires_in": {"type": "integer", "description": "Access Token expiration time in seconds"}
+            },
+            "required": ["access_token", "token_type", "expires_in"]
         }
     }
 }
@@ -248,18 +331,11 @@ limiter = Limiter(
 limiter.init_app(api)
 
 
-# --- API Key Validation ---
+# --- API Key Validation (for specific integrations, secondary to JWT) ---
 def validate_api_key():
-    # Exclude health check and Swagger UI paths from API key validation
-    if request.path in ['/senecaai/v1/health', '/apidocs', '/apispec_1.json'] or request.path.startswith(
-            '/flasgger_static'):
-        return None  # No API key needed for these paths
-
     api_key = request.headers.get('X-SENECA-AI-API-KEY')
     if not api_key:
-        api.logger.warning("API Key missing in request header.",
-                           extra={'event': 'auth_failed', 'reason': 'missing_key'})
-        return jsonify({"error": "Unauthorized: API Key missing"}), 401
+        return None # No API key provided, proceed to JWT check
 
     if not config.seneca_ai_api_key:
         api.logger.error("SENECA_AI_API_KEY is not configured in the application.", exc_info=True,
@@ -269,15 +345,18 @@ def validate_api_key():
     if api_key != config.seneca_ai_api_key:
         api.logger.warning("Invalid API Key provided.", extra={'event': 'auth_failed', 'reason': 'invalid_key'})
         return jsonify({"error": "Unauthorized: Invalid API Key"}), 401
+    
+    # If API key is valid, set a dummy user_id for authorization purposes
+    g.user_id = "api_key_user"
+    g.user_name = "api_key_user"
+    return None # Validation successful
 
-    return None  # Validation successful
 
-
-# --- Request Hooks for Correlation ID and API Key Validation ---
+# --- Request Hooks for Correlation ID and Authentication ---
 @api.before_request
 def before_request_func():
-    # Explicitly bypass all before_request logic for Swagger UI and spec generation paths
-    if request.path in ['/apidocs', '/apispec_1.json'] or request.path.startswith('/flasgger_static'):
+    # Exclude Swagger UI paths and health check from all authentication logic
+    if request.path in ['/apidocs', '/apispec_1.json', '/senecaai/v1/health'] or request.path.startswith('/flasgger_static'):
         return None
 
     # Correlation ID handling
@@ -286,16 +365,36 @@ def before_request_func():
     api.logger.info(f"Request started: {request.method} {request.path}",
                     extra={'event': 'request_start', 'method': request.method, 'path': request.path})
 
-    # API Key validation
-    validation_response = validate_api_key()
-    if validation_response:
-        return validation_response  # If validation fails, return the error response
+    # Exclude auth endpoints from requiring prior authentication
+    if request.path in ['/senecaai/v1/auth/login', '/senecaai/v1/auth/refresh', '/senecaai/v1/auth/logout']:
+        return None
 
-    # Placeholder for g.user_id. In a real app, this would be determined by the auth system
-    # after successful API key validation or user authentication.
-    # For this exercise, we'll use a fixed user_id for demonstration.
-    g.user_id = "test_user_123"
-    api.logger.debug(f"User ID set to: {g.user_id}")
+    # --- Authentication Logic ---
+    auth_header = request.headers.get('Authorization')
+    api_key_response = validate_api_key() # Check for API Key first (secondary mechanism)
+
+    if api_key_response: # If API Key validation failed
+        return api_key_response
+    elif g.get('user_id'): # If API Key was valid and set user_id
+        return None
+
+    # If no API Key or it wasn't used, try Bearer Token (JWT)
+    if auth_header and auth_header.startswith('Bearer '):
+        token = auth_header.split(' ')[1]
+        decoded_token = decode_jwt(token)
+
+        if "error" in decoded_token:
+            api.logger.warning(f"JWT authentication failed: {decoded_token['error']}", extra={'event': 'auth_failed', 'reason': decoded_token['error']})
+            return jsonify({"error": f"Unauthorized: {decoded_token['error']}"}), 401
+        
+        g.user_id = decoded_token['user_id']
+        g.user_name = decoded_token['user_name']
+        api.logger.debug(f"User {g.user_name} authenticated via JWT.")
+        return None
+    
+    # If no valid API Key and no valid JWT, then unauthorized
+    api.logger.warning("Authentication required: No valid API Key or JWT provided.", extra={'event': 'auth_failed', 'reason': 'no_auth_provided'})
+    return jsonify({"error": "Unauthorized: Authentication required"}), 401
 
 
 @api.after_request
@@ -327,7 +426,8 @@ def stt():
         default: en
         description: "The language of the api. e.g., 'en', 'es', 'fr'."
     security:
-      - APIKeyHeader: []
+      - BearerAuth: [] # Use BearerAuth for this protected endpoint
+      - APIKeyHeader: [] # Allow API Key as alternative
     responses:
       200:
         description: "Successfully transcribed text."
@@ -340,7 +440,7 @@ def stt():
       400:
         description: "Bad request, e.g., no file provided, empty file, or unsupported file type."
       401:
-        description: "Unauthorized: API Key missing or invalid."
+        description: "Unauthorized: API Key or JWT missing or invalid."
       503:
         description: "Service unavailable, Faster-Whisper model not loaded."
       500:
@@ -425,7 +525,8 @@ def get_supported_languages():
     Returns a list of languages supported by the Speech-to-Text service.
     ---
     security:
-      - APIKeyHeader: []
+      - BearerAuth: [] # Use BearerAuth for this protected endpoint
+      - APIKeyHeader: [] # Allow API Key as alternative
     responses:
       200:
         description: "A list of supported languages."
@@ -441,7 +542,7 @@ def get_supported_languages():
                 type: string
                 description: "The full name of the language (e.g., 'English', 'Spanish')."
       401:
-        description: "Unauthorized: API Key missing or invalid."
+        description: "Unauthorized: API Key or JWT missing or invalid."
     """
     api.logger.info("Request received for supported STT languages.")
     supported_languages = [{"code": code, "name": name} for code, name in whisper.tokenizer.LANGUAGES.items()]
@@ -488,27 +589,192 @@ def health_check():
         return jsonify({"status": "degraded", "model_status": "not loaded"}), 503
 
 
-# --- Conversation Management Endpoints ---
+# --- Authentication Endpoints ---
+@api.route('/senecaai/v1/auth/login', methods=['POST'])
+def login():
+    """
+    User Login
+    Authenticates a user and returns access and refresh tokens.
+    ---
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          $ref: '#/definitions/AuthLoginSchema'
+    responses:
+      200:
+        description: "Authentication successful."
+        schema:
+          $ref: '#/definitions/AuthTokensSchema'
+      400:
+        description: "Bad Request: Missing username or password."
+      401:
+        description: "Unauthorized: Invalid username or password."
+      500:
+        description: "Internal Server Error: An unexpected error occurred."
+    """
+    api.logger.info("Login request received.")
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
+        return jsonify({"error": "Database service unavailable."}), 500
 
-def validate_message_structure(messages):
-    """Helper function to validate the structure of messages."""
-    if not isinstance(messages, list):
-        return False, "Messages must be a list."
-    for msg in messages:
-        if not isinstance(msg, dict) or not all(k in msg for k in ['role', 'content', 'timestamp']):
-            return False, "Each message must have 'role', 'content', and 'timestamp'."
-        if not isinstance(msg['role'], str) or msg['role'] not in ["user", "assistant"]:
-            return False, "Message role must be 'user' or 'assistant'."
-        if not isinstance(msg['content'], str):
-            return False, "Message content must be a string."
-        if not isinstance(msg['timestamp'], str):
-            return False, "Message timestamp must be a string."
-        try:
-            # Attempt to parse to validate format
-            datetime.fromisoformat(msg['timestamp'].replace('Z', '+00:00'))
-        except ValueError:
-            return False, "Message timestamp must be in ISO 8601 format."
-    return True, None
+    try:
+        data = request.get_json()
+        if not data:
+            api.logger.warning("Login attempt with no data.")
+            return jsonify({"error": "Missing username or password."}), 400
+
+        username = data.get('username')
+        password = data.get('password')
+
+        if not username or not password:
+            api.logger.warning("Login attempt with missing username or password.")
+            return jsonify({"error": "Missing username or password."}), 400
+
+        user = db_client.get_user_by_username(username)
+
+        if user and bcrypt.verify(password, user['password_hash']):
+            access_token = generate_jwt(str(user['_id']), user['user_name'])
+            refresh_token = generate_refresh_token()
+            hashed_refresh_token = hash_refresh_token(refresh_token)
+
+            db_client.add_refresh_token_to_user(str(user['_id']), hashed_refresh_token)
+
+            api.logger.info(f"User {username} logged in successfully.")
+            return jsonify({
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "token_type": "Bearer",
+                "expires_in": config.jwt_access_token_expires_in
+            }), 200
+        else:
+            api.logger.warning(f"Failed login attempt for user: {username}")
+            return jsonify({"error": "Invalid username or password."}), 401
+
+    except PyMongoError as e:
+        api.logger.error(f"MongoDB error during login: {e}", exc_info=True)
+        return jsonify({"error": "Database error during login."}), 500
+    except Exception as e:
+        api.logger.error(f"An unexpected error occurred during login: {e}", exc_info=True)
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@api.route('/senecaai/v1/auth/refresh', methods=['POST'])
+def refresh_token():
+    """
+    Refresh Access Token
+    Refreshes an expired access token using a valid refresh token.
+    ---
+    parameters:
+      - name: Authorization
+        in: header
+        type: string
+        required: true
+        description: "Refresh Token (Bearer <refresh_token>)"
+    responses:
+      200:
+        description: "Token refreshed successfully."
+        schema:
+          $ref: '#/definitions/RefreshTokenResponseSchema'
+      400:
+        description: "Bad Request: Refresh token not provided."
+      401:
+        description: "Unauthorized: Invalid or expired refresh token."
+      500:
+        description: "Internal Server Error: An unexpected error occurred."
+    """
+    api.logger.info("Refresh token request received.")
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
+        return jsonify({"error": "Database service unavailable."}), 500
+
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            api.logger.warning("Refresh token request missing Authorization header or malformed.")
+            return jsonify({"error": "Refresh token not provided."}), 400
+
+        refresh_token = auth_header.split(' ')[1]
+        
+        user = db_client.find_user_by_refresh_token(refresh_token)
+
+        if user:
+            # Refresh token is valid, generate new access token
+            new_access_token = generate_jwt(str(user['_id']), user['user_name'])
+            api.logger.info(f"Access token refreshed for user: {user['user_name']}.")
+            return jsonify({
+                "access_token": new_access_token,
+                "token_type": "Bearer",
+                "expires_in": config.jwt_access_token_expires_in
+            }), 200
+        else:
+            api.logger.warning("Invalid or expired refresh token provided.")
+            return jsonify({"error": "Invalid or expired refresh token."}), 401
+
+    except PyMongoError as e:
+        api.logger.error(f"MongoDB error during token refresh: {e}", exc_info=True)
+        return jsonify({"error": "Database error during token refresh."}), 500
+    except Exception as e:
+        api.logger.error(f"An unexpected error occurred during token refresh: {e}", exc_info=True)
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@api.route('/senecaai/v1/auth/logout', methods=['POST'])
+def logout():
+    """
+    User Logout
+    Revokes the provided refresh token, effectively logging the user out.
+    ---
+    parameters:
+      - name: Authorization
+        in: header
+        type: string
+        required: true
+        description: "Refresh Token (Bearer <refresh_token>)"
+    responses:
+      200:
+        description: "Logout successful."
+      400:
+        description: "Bad Request: Refresh token not provided."
+      401:
+        description: "Unauthorized: Invalid refresh token."
+      500:
+        description: "Internal Server Error: An unexpected error occurred."
+    """
+    api.logger.info("Logout request received.")
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
+        return jsonify({"error": "Database service unavailable."}), 500
+
+    try:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            api.logger.warning("Logout attempt with missing Authorization header or malformed.")
+            return jsonify({"error": "Refresh token not provided."}), 400
+
+        refresh_token = auth_header.split(' ')[1]
+        
+        # Find the user associated with the refresh token
+        user = db_client.find_user_by_refresh_token(refresh_token)
+        if not user:
+            api.logger.warning("Logout failed: Invalid refresh token provided.")
+            return jsonify({"error": "Invalid refresh token."}), 401
+
+        # Attempt to revoke the refresh token
+        if db_client.revoke_refresh_token(str(user['_id']), refresh_token): # Pass user_id and refresh_token
+            api.logger.info("Logout successful: Refresh token revoked.")
+            return jsonify({"message": "Logout successful."}), 200
+        else:
+            api.logger.warning("Logout failed: Invalid refresh token provided.")
+            return jsonify({"error": "Invalid refresh token."}), 401
+
+    except PyMongoError as e:
+        api.logger.error(f"MongoDB error during logout: {e}", exc_info=True)
+        return jsonify({"error": "Database error during logout."}), 500
+    except Exception as e:
+        api.logger.error(f"An unexpected error occurred during logout: {e}", exc_info=True)
+        return jsonify({"error": "An internal server error occurred."}), 500
 
 
 @api.route('/senecaai/v1/conversations', methods=['GET'])
@@ -531,7 +797,8 @@ def get_conversations():
         default: 1
         description: "Page number (1-based)."
     security:
-      - APIKeyHeader: []
+      - BearerAuth: [] # Protected endpoint
+      - APIKeyHeader: [] # Allow API Key as alternative
     responses:
       200:
         description: "List of user conversations."
@@ -542,7 +809,7 @@ def get_conversations():
       400:
         description: "Bad Request: Invalid pagination parameters."
       401:
-        description: "Unauthorized: API Key missing or invalid."
+        description: "Unauthorized: API Key or JWT missing or invalid."
       500:
         description: "Internal Server Error: An unexpected error occurred."
     """
@@ -556,7 +823,7 @@ def get_conversations():
         num_page = int(request.args.get('numPage', 1))
 
         if conv_per_page <= 0 or num_page <= 0:
-            return jsonify({"error": "convPerPage and numPage must be positive integers."}), 400
+            return jsonify({"error": "Pagination parameters 'convPerPage' and 'numPage' must be positive integers."}), 400
 
         skip = (num_page - 1) * conv_per_page
         limit = conv_per_page
@@ -569,7 +836,7 @@ def get_conversations():
                         mimetype='application/json'), 200
     except ValueError:
         api.logger.error("Invalid pagination parameters provided.", exc_info=True)
-        return jsonify({"error": "Invalid pagination parameters. convPerPage and numPage must be integers."}), 400
+        return jsonify({"error": "Invalid pagination parameters. 'convPerPage' and 'numPage' must be integers."}), 400
     except PyMongoError as e:
         api.logger.error(f"MongoDB error while fetching conversations: {e}", exc_info=True)
         return jsonify({"error": "Database error while fetching conversations."}), 500
@@ -590,8 +857,11 @@ def get_conversation_by_id(_id):
         type: string
         required: true
         description: "Unique identifier of the conversation (MongoDB ObjectId)."
-    security:
-      - APIKeyHeader: []
+      - name: Authorization
+        in: header
+        type: string
+        required: true
+        description: "JWT Access Token (Bearer <token>)"
     responses:
       200:
         description: "The requested conversation."
@@ -600,7 +870,7 @@ def get_conversation_by_id(_id):
       400:
         description: "Bad Request: Invalid conversation ID format."
       401:
-        description: "Unauthorized: API Key missing or invalid."
+        description: "Unauthorized: API Key or JWT missing or invalid."
       403:
         description: "Forbidden: User does not have access to this conversation."
       404:
@@ -654,7 +924,8 @@ def create_conversation():
         schema:
           $ref: '#/definitions/NewConversationSchema'
     security:
-      - APIKeyHeader: []
+      - BearerAuth: [] # Protected endpoint
+      - APIKeyHeader: [] # Allow API Key as alternative
     responses:
       201:
         description: "The conversation created successfully."
@@ -667,7 +938,7 @@ def create_conversation():
       400:
         description: "Bad Request: Invalid conversation data provided."
       401:
-        description: "Unauthorized: API Key missing or invalid."
+        description: "Unauthorized: API Key or JWT missing or invalid."
       500:
         description: "Internal Server Error: An unexpected error occurred."
     """
@@ -726,7 +997,8 @@ def update_conversation(_id):
         schema:
           $ref: '#/definitions/PartialConversationUpdateSchema'
     security:
-      - APIKeyHeader: []
+      - BearerAuth: [] # Protected endpoint
+      - APIKeyHeader: [] # Allow API Key as alternative
     responses:
       200:
         description: "The updated conversation."
@@ -735,7 +1007,7 @@ def update_conversation(_id):
       400:
         description: "Bad Request: Invalid update data provided or invalid conversation ID format."
       401:
-        description: "Unauthorized: API Key missing or invalid."
+        description: "Unauthorized: API Key or JWT missing or invalid."
       403:
         description: "Forbidden: User does not have access to modify this conversation."
       404:

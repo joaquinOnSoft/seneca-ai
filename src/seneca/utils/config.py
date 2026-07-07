@@ -104,6 +104,14 @@ class AppConfig:
         default_factory=lambda: os.getenv("MONGODB_URI", "mongodb://localhost:27017/seneca_db")
     )
 
+    # JWT Configuration
+    jwt_secret_key: str = field(
+        default_factory=lambda: os.getenv("JWT_SECRET_KEY", "")
+    )
+    jwt_access_token_expires_in: int = field(
+        default_factory=lambda: int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_IN", "3600")) # 1 hour
+    )
+
     def __post_init__(self):
         # Basic validation for stt_backend
         if self.stt_backend not in _ALLOWED_STT_BACKENDS:            
@@ -129,6 +137,9 @@ class AppConfig:
                 logger.info(f"SENECA_AI_API_KEY loaded from file: {self.seneca_ai_api_key_file}")
             except Exception as e:
                 logger.warning(f"Could not read SENECA_AI_API_KEY from file {self.seneca_ai_api_key_file}. Error: {e}")
+
+        if not self.jwt_secret_key:
+            raise ValueError("JWT_SECRET_KEY must be set in the environment variables or .env file.")
 
 
 # Singleton – import and use directly

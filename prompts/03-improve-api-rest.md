@@ -1,10 +1,14 @@
+# Security in the REST API
+
 You are an expert Backend developer in Python. The requirements 
 for improving the Seneca AI REST API are set out below. 
 
-Improve the prompt to create a more secure REST API that follows best practice.
+Improve the prompt to create a more secure REST API that follows market best practice.
+If you have a better approach you can suggest it instead of follow literally these instructions.
 
 
 Prompt:
+
 
 ## Authentication   
 
@@ -12,41 +16,85 @@ Below are the different mechanisms to authenticate with Seneca AI using Seneca A
 
  - **Basic**: Invoke POST method on `/senecaai/v1/sessions` resource with user credentials. 
    Seneca AI will validate user credentials, against mongodb, and creates a session.
+   Credentials 
 
-For all the subsequent requests to Seneca AI with REST Services.
+For all the subsequent requests to Seneca AI with REST Services, except 
+the '/senecaai/v1/health', '/apidocs', '/apispec_1.json', '/flasgger_static'.
 
-    1. Set JSESSIONID cookie in all the HTTP requests. (or)
-    2. Set user message digest as a header(otmmauthtoken) in all the HTTP requests. You can find the user message digest in the response of the /v6/sessions request. 
-    Eg: otmmauthtoken: 3dba7a9383964e759b3427378d338febc4dc0485 . (or)
-    3. Set OAuth2.0 access token as a Authorization header in all the HTTP requests. Eg: Authorization: Basic [access_token]
+    1. Set SESSIONID cookie in all the HTTP requests. (or)
+    2. Set user message digest as a header (X-SENECA-AI-TOKEN) in all the HTTP requests. 
+      You can find the user message digest in the response of the /senecaai/v1/sessions request. 
+      Eg: X-SENECA-AI-TOKEN: 3dba7a9383964e759b3427378d338febc4dc0485 . 
 
-The following code snippet demonstrates how to perform basic authentication to OTMM that uses Jersey Client API to communicate with REST services.
+The token is valid for an hour since is generated.
 
-Client client = ClientBuilder.newClient();
-client.register(MOXyContextResolver.class);
-client.register(JsonMoxyConfigurationContextResolver.class);
-client.register(MultiPartFeature.class);
-rootTarget = client.target("http://localhost:11090/otmmapi");
+Seneca AI must validate if the cookie or the header token is set to answer the client, except
+for those excluded methods previously enumerated.
 
-Form form = new Form();
-form.param("username", username);
-form.param("password", password);
+## [POST] /senecaai/v1/sessions (New API method)
 
-// Making POST request on session resource to authenticate
-Response response = rootTarget.path("/v6/sessions").request().post(Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED), Response.class);
+ - **POST** `/senecaai/v1/sessions` Create a Session
+ - **Description**: Create a security Session in Seneca AI. It returns a valid Security Session object if the provided credentials are valid.
+ - **Request body**: application/x-www-form-urlencoded 
+   - **Params**: 
+     - **user_name**: Required (string) UserName/UserId 
+     - **password**: Required (string)
+ - **Response**: 
+   - 200: The request has been completed successfully
+   
+     ```json
+     {
+      "user_name": "string", 
+      "user_full_name": "string",
+      "user_id": "string",
+      "x-seneca-ai-token": "string"
+     }
+     ```
+   
+   - 400: A required parameter is not specified or has null or invalid value
+   - 401: Unauthorized access to the resource 
+   - 500: An internal server error occurred, refer to the response for more information
 
- Map<String, NewCookie> cookieMap = response.getCookies();
-// Getting jsessionId from cookie
-String jsessionId = cookieMap.get("JSESSIONID");
-SessionRepresentation sessionRepresentation = response.readEntity(SessionRepresentation.class);
-// Getting user authentication token from response
-string otmmauthtoken = sessionRepresentation.getSession().getMessageDigest();
+## [POST] /senecaai/v1/sessions/token
 
-Below is code snippet to logout from OTMM
+ - **POST** `/senecaai/v1/sessions/token` Refresh an access token
+ - **Description**: Refresh an access token. Extends the token expiration date in one hour
+ - **Parameters**: No parameters 
+ - **Request body**: application/x-www-form-urlencoded
+   - **Params**: 
+      - user_name: (Required if password is present) string. Username. 
+      - password: (Required if user_name is present) string. Password. 
+      - user_id: (Required if X-SENECA-AI-API-KEY is present) string. User identifier.
+      - X-SENECA-AI-API-KEY: (Required if user_id is present) string. User API key (secret).
+ - **Response**: 
+   - 200: The request has been completed successfully
 
-// How to set JSESSIONID cookie into request
-rootTarget.path("/v6/sessions").request().cookie(jsessionId).delete();
+```json
+   {
+      "x-seneca-ai-token": "string",
+      "expiry_time": "2026-07-01T20:58:55.835Z"
+   }
+```
+   - 400: A required parameter is not specified or has null or invalid value 
+   - 500: An internal server error occurred, refer to the response for more information
 
-// How to set otmm authentication token into request 
-rootTarget.path("/v6/sessions").request().header("otmmauthtoken",otmmauthtoken).delete()
-    
+## Tasks
+
+- Apply the changes to the REST API methods
+- Apply the changes to the REST API unit test
+- Modify de "Dockerfile" for the `api` container to create a collection with the user info:
+ 
+```json
+   {
+      "user_name": "string", 
+      "user_full_name": "string",
+      "user_id": "string",
+      "x-seneca-ai-api-key": "string",
+      "sessions": [
+         {
+            "x-seneca-ai-token": "string",
+            "expiry_time": "2026-07-01T20:58:55.835Z"   
+         } 
+      ]   
+  }
+```
