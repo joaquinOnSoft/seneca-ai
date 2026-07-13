@@ -78,6 +78,16 @@ class AppConfig:
     whisper_compute_type: str = field(
         default_factory=lambda: os.getenv("WHISPER_COMPUTE_TYPE", "int8")
     )
+    audio_chunk: int = field(
+        default_factory=lambda: int(os.getenv("AUDIO_CHUNK", 1024))
+    )
+    audio_channels: int = field(
+        default_factory=lambda: int(os.getenv("AUDIO_CHANNELS", 1))
+    )
+    audio_rate: int = field(
+        default_factory=lambda: int(os.getenv("AUDIO_RATE", 16000)) # 16kHz for Whisper
+    )
+
     # Hugging Face token.
     # Please set an HF_TOKEN to enable higher rate limits and faster downloads.
     hf_token: str = field(

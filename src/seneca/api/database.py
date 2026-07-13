@@ -3,12 +3,12 @@ import sys
 from datetime import datetime, timezone
 
 from bson.objectid import ObjectId
-from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401 — "Applies the patch via side effect
 # noinspection PyUnresolvedReferences
 from passlib.hash import bcrypt
-
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, PyMongoError
+
+from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401 — "Applies the patch via side effect
 
 
 class MongoDatabase:

@@ -50,10 +50,10 @@ class SpeechToTextService:
             self._on_transcription_complete("") # No api recorded
 
     def _record_audio_task(self):
-        CHUNK = 1024
+        CHUNK = config.audio_chunk
         FORMAT = pyaudio.paInt16
-        CHANNELS = 1
-        RATE = 16000 # 16kHz for Whisper
+        CHANNELS = config.audio_channels
+        RATE = config.audio_rate # 16kHz for Whisper
 
         try:
             stream = self._pyaudio_instance.open(

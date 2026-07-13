@@ -2,21 +2,19 @@ import io
 import json
 from time import sleep
 from unittest.mock import patch, MagicMock
-import datetime as dt  # Import datetime module as dt
+import datetime as dt
+from http import HTTPStatus # Import HTTPStatus for standard status codes
 
 import pytest
 from bson.objectid import ObjectId
 from pymongo.errors import PyMongoError
-from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401 — "Applies the patch via side effect
-# noinspection PyUnresolvedReferences
+from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401
 from passlib.hash import bcrypt
 
-# Import your Flask application (ensure 'api' is the Flask object)
-# We assume the import structure is correct from the project root
 from seneca.api.api import api as flask_app
 from seneca.api.api import _prepare_response_data, MongoJsonEncoder, generate_jwt, generate_refresh_token, \
     hash_refresh_token, verify_refresh_token
-from seneca.api.database import MongoDatabase  # Import MongoDatabase for spec
+from seneca.api.database import MongoDatabase
 
 
 # Mock config for JWT
@@ -26,7 +24,7 @@ class MockConfig:
         self.jwt_access_token_expires_in = 900  # 15 minutes
         self.jwt_refresh_token_expires_in_days = 7
         self.jwt_secret_key = "super-secret-test-key"
-        self.seneca_ai_api_key = "test-seneca-ai-api-key"  # For API Key validation
+        self.seneca_ai_api_key = "test-seneca-ai-api-key"
         self.whisper_model_size = "small"
         self.whisper_device = "cpu"
         self.whisper_compute_type = "int8"
@@ -35,41 +33,36 @@ class MockConfig:
 
 # Patch config globally for tests
 with patch('seneca.api.api.config', new=MockConfig()):
-    from seneca.api.api import config  # Re-import config to get the patched version
+    from seneca.api.api import config
+
 
 API_METHOD_HEALTH = '/senecaai/v1/health'
 API_METHOD_STT_LANGUAGES = '/senecaai/v1/stt/languages'
 API_METHOD_STT = '/senecaai/v1/stt'
 
-# New API Endpoints
 API_METHOD_CONVERSATIONS = '/senecaai/v1/conversations'
 API_METHOD_CONVERSATION_BY_ID = '/senecaai/v1/conversations/'
 API_METHOD_AUTH_LOGIN = '/senecaai/v1/auth/login'
 API_METHOD_AUTH_REFRESH = '/senecaai/v1/auth/refresh'
 API_METHOD_AUTH_LOGOUT = '/senecaai/v1/auth/logout'
 
-# Define a test API key
 TEST_API_KEY = "test-seneca-ai-api-key"
-TEST_USER_ID = str(ObjectId())  # Use a fixed ObjectId string for consistency
+TEST_USER_ID = str(ObjectId())
 TEST_USER_NAME = "testuser"
 TEST_PASSWORD = "testpassword"
-# Truncate TEST_PASSWORD to 72 bytes as required by bcrypt
 TEST_PASSWORD_HASH = bcrypt.hash(TEST_PASSWORD[:72])
 TEST_USER_FULL_NAME = "Test User"
 
-# Sample ObjectIds for testing
 TEST_CONVERSATION_ID_1 = str(ObjectId())
 TEST_CONVERSATION_ID_2 = str(ObjectId())
 TEST_CONVERSATION_ID_OTHER_USER = str(ObjectId())
-TEST_CONVERSATION_ID_NEW = str(ObjectId())  # For POST tests
+TEST_CONVERSATION_ID_NEW = str(ObjectId())
 
-# Sample Datetime objects
 TEST_DATETIME_1 = dt.datetime(2023, 10, 27, 15, 59, 50, tzinfo=dt.timezone.utc)
 TEST_DATETIME_2 = dt.datetime(2023, 10, 26, 10, 30, 0, tzinfo=dt.timezone.utc)
 TEST_DATETIME_NEW_MSG = dt.datetime(2023, 10, 28, 10, 0, 0, tzinfo=dt.timezone.utc)
 TEST_DATETIME_UPDATED_MSG = dt.datetime(2023, 10, 29, 10, 0, 0, tzinfo=dt.timezone.utc)
 
-# Sample Conversation Data (using ObjectId and datetime objects directly for internal mock storage)
 SAMPLE_CONVERSATION_1 = {
     "_id": ObjectId(TEST_CONVERSATION_ID_1),
     "user_id": TEST_USER_ID,
@@ -103,15 +96,9 @@ SAMPLE_CONVERSATION_OTHER_USER = {
     ]
 }
 
-
-# Helper to convert ObjectId and datetime to string for JSON comparison
-# This helper is now less critical as _prepare_response_data should handle it,
-# but useful for explicit comparisons in tests.
 def conversation_to_json_compatible(conv):
     return _prepare_response_data(conv)
 
-
-# Mock of the languages returned by the /senecaai/v1/stt/languages endpoint
 MOCKED_LANGUAGES = [
     {"code": "en", "name": "english"},
     {"code": "zh", "name": "chinese"},
@@ -218,26 +205,22 @@ MOCKED_LANGUAGES = [
 
 @pytest.fixture
 def client():
-    """Configures the test client for the Flask application."""
     flask_app.config['TESTING'] = True
 
-    # Create a mock config object
     mock_config = MagicMock()
     mock_config.seneca_ai_api_key = TEST_API_KEY
-    mock_config.whisper_model_size = "small"  # Default value, adjust if needed for specific tests
-    mock_config.whisper_device = "cpu"  # Default value
-    mock_config.whisper_compute_type = "int8"  # Default value
-    mock_config.hf_token = None  # Default value, or set a test token if needed
-    mock_config.stt_backend = "faster-whisper"  # Default backend for most tests
-    mock_config.mongodb_uri = "mongodb://mock_host:27017/mock_db"  # Added for MongoDB connection
+    mock_config.whisper_model_size = "small"
+    mock_config.whisper_device = "cpu"
+    mock_config.whisper_compute_type = "int8"
+    mock_config.hf_token = None
+    mock_config.stt_backend = "faster-whisper"
+    mock_config.mongodb_uri = "mongodb://mock_host:27017/mock_db"
     mock_config.jwt_access_token_expires_in = 900
     mock_config.jwt_refresh_token_expires_in_days = 7
     mock_config.jwt_secret_key = "super-secret-test-key"
 
-    # Patch the config object in the api module
     with patch('seneca.api.api.config', new=mock_config):
-        # Disable rate limiting for tests
-        flask_app.config["LIMITER_ENABLED"] = False  # Correct way to disable Flask-Limiter
+        flask_app.config["LIMITER_ENABLED"] = False
         flask_app.config["RATELIMIT_ENABLED"] = False
 
         from seneca.api.api import limiter
@@ -249,10 +232,7 @@ def client():
 
 @pytest.fixture
 def mock_whisper_model_fixture():
-    """Fixture to mock the faster-whisper model in tests."""
-    # Patch the 'model' object directly in the api module
     with patch('seneca.api.api.model') as MockWhisperModel:
-        # Configure a default value for transcribe
         MockWhisperModel.transcribe.return_value = ([MagicMock(text="Mocked transcription")],
                                                     MagicMock(language="en", language_probability=1.0))
         yield MockWhisperModel
@@ -260,10 +240,9 @@ def mock_whisper_model_fixture():
 
 @pytest.fixture
 def mock_temp_file_fixture():
-    """Fixture to mock tempfile.NamedTemporaryFile and os.remove."""
     with patch('tempfile.NamedTemporaryFile') as MockNamedTemporaryFile:
         mock_file_obj = MagicMock()
-        mock_file_obj.name = "/tmp/mock_audio_file.mp3"  # Simulated file name
+        mock_file_obj.name = "/tmp/mock_audio_file.mp3"
         MockNamedTemporaryFile.return_value.__enter__.return_value = mock_file_obj
         with patch('os.remove') as MockOsRemove:
             yield mock_file_obj, MockOsRemove
@@ -271,12 +250,11 @@ def mock_temp_file_fixture():
 
 @pytest.fixture(autouse=True)
 def delay_to_avoid_too_many_request_per_second():
-    sleep(0.01)  # Reduced delay as rate limiting is disabled
+    sleep(0.01)
 
 
 @pytest.fixture
 def mock_db_client():
-    # Simulate the internal data stores
     _users_store = {
         ObjectId(TEST_USER_ID): {
             "_id": ObjectId(TEST_USER_ID),
@@ -293,18 +271,13 @@ def mock_db_client():
         ObjectId(SAMPLE_CONVERSATION_OTHER_USER["_id"]): SAMPLE_CONVERSATION_OTHER_USER.copy(),
     }
 
-    # Create a mock for the MongoDatabase instance
-    mock_db_instance = MagicMock()  # No spec=MongoDatabase, we'll mock methods directly
+    mock_db_instance = MagicMock()
     mock_db_instance.is_connected.return_value = True
-    mock_db_instance._is_mock = True  # Indicate it's a mock instance
+    mock_db_instance._is_mock = True
 
-    # Mock the collection objects and their methods directly
-    # These are needed because the real MongoDatabase methods check if they are None
     mock_db_instance.users_collection = MagicMock()
     mock_db_instance.conversations_collection = MagicMock()
 
-    # Configure mock methods to interact with these simulated stores
-    # These mock methods will replace the real MongoDatabase methods
     mock_db_instance.get_conversations.side_effect = lambda user_id, skip=0, limit=20: \
         [doc.copy() for doc in _conversations_store.values() if doc.get("user_id") == user_id][skip: skip + limit]
 
@@ -327,22 +300,21 @@ def mock_db_client():
         next((user_doc.copy() for user_doc in _users_store.values() if user_doc["user_name"] == username), None)
 
     mock_db_instance.get_user_by_id.side_effect = lambda user_id: \
-        _users_store.get(ObjectId(user_id))  # Return reference, not copy
+        _users_store.get(ObjectId(user_id))
 
     mock_db_instance.find_user_by_refresh_token.side_effect = lambda refresh_token_to_find: \
         _find_user_by_refresh_token_mock(refresh_token_to_find, _users_store)
 
-    mock_db_instance.add_refresh_token_to_user.side_effect = lambda user_id, hashed_token: \
-        _add_refresh_token_to_user_mock(user_id, hashed_token, _users_store)
+    mock_db_instance.add_refresh_token_to_user.side_effect = lambda user_id, hashed_token, expires_at: \
+        _add_refresh_token_to_user_mock(user_id, hashed_token, expires_at, _users_store)
 
     mock_db_instance.revoke_refresh_token.side_effect = lambda user_id, refresh_token_to_revoke: \
         _revoke_refresh_token_mock(user_id, refresh_token_to_revoke, _users_store)
 
-    # Helper functions for side_effects (defined outside to avoid re-definition)
     def _create_mock_conversation(user_id, title, messages, store):
         new_id = ObjectId()
         doc = {
-            "_id": new_id,  # Keep as ObjectId
+            "_id": new_id,
             "user_id": user_id,
             "title": title,
             "created_at": TEST_DATETIME_NEW_MSG,
@@ -365,18 +337,17 @@ def mock_db_client():
                 if bcrypt.verify(refresh_token_to_find, rt_entry["token_hash"]) and \
                         rt_entry["expires_at"] > dt.datetime.now(dt.timezone.utc) and \
                         not rt_entry["revoked"]:
-                    return user_doc  # Return reference, not copy
+                    return user_doc
         return None
 
-    def _add_refresh_token_to_user_mock(user_id, hashed_token, store):
+    def _add_refresh_token_to_user_mock(user_id, hashed_token, expires_at, store):
         user_obj_id = ObjectId(user_id)
         if user_obj_id in store:
             user_doc = store[user_obj_id]
             user_doc.setdefault("refresh_tokens", []).append({
                 "token_hash": hashed_token,
                 "issued_at": dt.datetime.now(dt.timezone.utc),
-                "expires_at": dt.datetime.now(dt.timezone.utc) + dt.timedelta(
-                    days=config.jwt_refresh_token_expires_in_days),
+                "expires_at": expires_at, # Use the passed expires_at
                 "revoked": False
             })
             return True
@@ -392,11 +363,9 @@ def mock_db_client():
                     return True
         return False
 
-    # Expose the internal stores for direct manipulation in tests if needed (e.g., for setup)
     mock_db_instance._users_store_accessor = _users_store
     mock_db_instance._conversations_store_accessor = _conversations_store
 
-    # Patch the db_client in the api module with our mock instance
     with patch('seneca.api.api.db_client', new=mock_db_instance):
         yield mock_db_instance
 
@@ -404,41 +373,31 @@ def mock_db_client():
 # --- Tests for /senecaai/v1/stt ---
 
 def test_stt_success_mp3(client, mock_whisper_model_fixture, mock_temp_file_fixture, mock_db_client):
-    """
-  Tests successful transcription of an MP3 file with a specified language.
-  The /senecaai/v1/stt method receives the lang=es parameter and in the body an mp3 file
-  (simulated) and returns the following: { "text": " 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10" }
-  """
     mock_file_obj, mock_os_remove = mock_temp_file_fixture
 
-    # Configure the mock to return the specific text
     mock_whisper_model_fixture.transcribe.return_value = (
         [MagicMock(text=" 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10")],
         MagicMock(language="es", language_probability=1.0)
     )
 
-    # Simulate the MP3 file content
-    dummy_mp3_content = b"fake mp3 api data"
+    dummy_mp3_content = b"fake mp3 audio data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), '1-10-sp.mp3'),
         'lang': 'es'
     }
-    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
+    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     response = client.post(API_METHOD_STT, data=data, content_type='multipart/form-data', headers=headers)
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     assert json.loads(response.data) == {"text": " 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"}
     mock_whisper_model_fixture.transcribe.assert_called_once_with(mock_file_obj.name, language='es')
     mock_os_remove.assert_called_once_with(mock_file_obj.name)
 
 
 def test_stt_success_google_backend(client, mock_temp_file_fixture, mock_db_client):
-    """Tests successful transcription using the Google Web Speech backend."""
     mock_file_obj, mock_os_remove = mock_temp_file_fixture
 
-    # Temporarily change backend to google for this test
     with patch('seneca.api.api.config.stt_backend', 'google'):
-        # Mock speech_recognition
         with patch('speech_recognition.Recognizer.record') as mock_record, \
                 patch('speech_recognition.Recognizer.recognize_google') as mock_recognize, \
                 patch('speech_recognition.AudioFile') as mock_audiofile:
@@ -452,172 +411,139 @@ def test_stt_success_google_backend(client, mock_temp_file_fixture, mock_db_clie
             headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
             response = client.post(API_METHOD_STT, data=data, content_type='multipart/form-data', headers=headers)
 
-            assert response.status_code == 200
+            assert response.status_code == HTTPStatus.OK
             assert json.loads(response.data) == {"text": "Google transcription result"}
             mock_recognize.assert_called_once()
             mock_os_remove.assert_called_once_with(mock_file_obj.name)
 
 
 def test_stt_no_file_provided(client, mock_db_client):
-    """Tests the case where no file is provided. Should return 400."""
-    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
+    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     response = client.post(API_METHOD_STT, data={}, content_type='multipart/form-data', headers=headers)
-    assert response.status_code == 400
-    assert json.loads(response.data) == {"error": "No api file provided"}
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert json.loads(response.data) == {"error": "No audio file provided"}
 
 
 def test_stt_empty_file(client, mock_db_client):
-    """Tests the case where an empty file is provided."""
     dummy_empty_content = b""
     data = {
         'file': (io.BytesIO(dummy_empty_content), 'empty.mp3')
     }
-    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
+    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     response = client.post(API_METHOD_STT, data=data, content_type='multipart/form-data', headers=headers)
-    assert response.status_code == 400
-    assert json.loads(response.data) == {"error": "Empty api file"}
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert json.loads(response.data) == {"error": "Empty audio file"}
 
 
 def test_stt_invalid_file_type(client, mock_db_client):
-    """Tests the case of an disallowed file type."""
     dummy_txt_content = b"this is a text file"
     data = {
         'file': (io.BytesIO(dummy_txt_content), 'test.txt')
     }
-    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
+    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert json.loads(response.data) == {"error": "Invalid file type. Only .wav and .mp3 are supported."}
 
 
 def test_stt_model_not_loaded(client, mock_db_client):
-    """Tests the case where the Faster-Whisper model has not been loaded."""
     with patch('seneca.api.api.model', None):
-        dummy_mp3_content = b"fake mp3 api data"  # Added dummy content
+        dummy_mp3_content = b"fake mp3 audio data"
         data = {
             'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
         }
         headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
         response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
-        assert response.status_code == 503
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
         assert json.loads(response.data) == {"error": "Speech-to-Text service is unavailable."}
 
 
 def test_stt_transcription_error(client, mock_whisper_model_fixture, mock_temp_file_fixture, mock_db_client):
-    """Tests the case where faster-whisper transcription fails."""
-    # The actual error message from faster-whisper when given invalid api data
     expected_error_message = "An internal server error occurred during transcription."
-    mock_whisper_model_fixture.transcribe.side_effect = Exception(
-        "Whisper internal error")  # The actual exception can be anything
+    mock_whisper_model_fixture.transcribe.side_effect = Exception("Whisper internal error")
     mock_file_obj, mock_os_remove = mock_temp_file_fixture
-    dummy_mp3_content = b"fake mp3 api data"
+    dummy_mp3_content = b"fake mp3 audio data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }
-    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
+    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
     response = client.post(API_METHOD_STT, data=data, content_type='multipart/form-data',
-                           headers=headers)  # Fixed typo here
+                           headers=headers)
 
-    assert response.status_code == 500
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
     assert json.loads(response.data) == {"error": expected_error_message}
 
 
-# --- New tests for API Key Authentication ---
-
 def test_stt_missing_api_key(client, mock_db_client):
-    """Tests that STT endpoint returns 401 if no API key is provided."""
-    dummy_mp3_content = b"fake mp3 api data"
+    dummy_mp3_content = b"fake mp3 audio data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }
-    response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data')  # No headers
-    assert response.status_code == 401
-    assert json.loads(response.data) == {"error": "Unauthorized: Authentication required"}
+    response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data')
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert json.loads(response.data) == {"error": "Authentication required"}
 
 
 def test_stt_invalid_api_key(client, mock_db_client):
-    """Tests that STT endpoint returns 401 if an invalid API key is provided."""
-    dummy_mp3_content = b"fake mp3 api data"
+    dummy_mp3_content = b"fake mp3 audio data"
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
     }
-    headers = {'X-SENECA-AI-API-KEY': "invalid-key"}  # Changed to an invalid key
+    headers = {'X-SENECA-AI-API-KEY': "invalid-key"}
     response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
-    assert response.status_code == 401
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert json.loads(response.data) == {"error": "Unauthorized: Invalid API Key"}
 
 
 # --- Tests for /senecaai/v1/stt/languages ---
 
 def test_get_supported_languages(client, mock_db_client):
-    """
-  Tests the endpoint for getting supported languages.
-  The /senecaai/v1/stt/languages method returns the MOCKED_LANGUAGES list.
-  """
-    # Mock whisper.tokenizer.LANGUAGES only for this test
     with patch('whisper.tokenizer.LANGUAGES', {lang['code']: lang['name'] for lang in MOCKED_LANGUAGES}):
-        headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}  # Add API key header
+        headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
         response = client.get(API_METHOD_STT_LANGUAGES, headers=headers)
-        assert response.status_code == 200
+        assert response.status_code == HTTPStatus.OK
         data = json.loads(response.data)
         assert isinstance(data, list)
         assert data == MOCKED_LANGUAGES
 
 
 def test_get_supported_languages_missing_api_key(client, mock_db_client):
-    """Tests that languages endpoint returns 401 if no API key is provided."""
-    response = client.get(API_METHOD_STT_LANGUAGES)  # No headers
-    assert response.status_code == 401
-    assert json.loads(response.data) == {"error": "Unauthorized: Authentication required"}
+    response = client.get(API_METHOD_STT_LANGUAGES)
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+    assert json.loads(response.data) == {"error": "Authentication required"}
 
 
 def test_get_supported_languages_invalid_api_key(client, mock_db_client):
-    """Tests that languages endpoint returns 401 if an invalid API key is provided."""
     headers = {'X-SENECA-AI-API-KEY': "invalid-key"}
     response = client.get(API_METHOD_STT_LANGUAGES, headers=headers)
-    assert response.status_code == 401
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert json.loads(response.data) == {"error": "Unauthorized: Invalid API Key"}
 
 
 # --- Tests for /senecaai/v1/health ---
 
 def test_health_check_model_loaded(client, mock_whisper_model_fixture, mock_db_client):
-    """Tests the health check endpoint when the Faster-Whisper model is loaded."""
-    # mock_whisper_model_fixture ensures api.model is not None
-    response = client.get(API_METHOD_HEALTH)  # No headers needed for health check
-    assert response.status_code == 200
+    response = client.get(API_METHOD_HEALTH)
+    assert response.status_code == HTTPStatus.OK
     assert json.loads(response.data) == {"status": "ok", "model_status": "loaded"}
 
 
 def test_health_check_google_backend(client, mock_db_client):
-    """Tests the health check endpoint when the Google Web Speech backend is used."""
     with patch('seneca.api.api.config.stt_backend', 'google'):
         response = client.get(API_METHOD_HEALTH)
-        assert response.status_code == 200
+        assert response.status_code == HTTPStatus.OK
         assert json.loads(response.data) == {"status": "ok", "model_status": "google_online"}
 
 
 def test_health_check_model_not_loaded(client, mock_db_client):
-    """Tests the case where the Faster-Whisper model is not loaded."""
     with patch('seneca.api.api.model', None):
-        dummy_mp3_content = b"fake mp3 api data"  # Added dummy content
-        data = {
-            'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3')
-        }
-        headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
-        response = client.post('/senecaai/v1/stt', data=data, content_type='multipart/form-data', headers=headers)
-        assert response.status_code == 503
-        assert json.loads(response.data) == {"error": "Speech-to-Text service is unavailable."}
+        response = client.get(API_METHOD_HEALTH) # Health check itself should return 503 if model not loaded
+        assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+        assert json.loads(response.data) == {"status": "degraded", "model_status": "not loaded"}
 
 
 # --- New test for Rate Limiting ---
 def test_rate_limiting(client, mock_whisper_model_fixture, mock_temp_file_fixture, mock_db_client):
-    """
-    Tests that the API enforces a rate limit of 5 requests per second.
-    """
-    # This test is now less relevant as rate limiting is disabled in the client fixture.
-    # It will always pass with status 200 for all requests.
-    # If you want to test rate limiting, you'd need a separate client fixture where it's enabled.
     mock_file_obj, mock_os_remove = mock_temp_file_fixture
     mock_whisper_model_fixture.transcribe.return_value = (
         [MagicMock(text="Mocked transcription")],
@@ -626,34 +552,28 @@ def test_rate_limiting(client, mock_whisper_model_fixture, mock_temp_file_fixtur
 
     endpoint = API_METHOD_STT
     headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY}
-    dummy_mp3_content = b"fake mp3 api data"
+    dummy_mp3_content = b"fake mp3 audio data"
 
-    # Make 5 requests, all should pass
     for i in range(5):
-        # Create a new BytesIO object for each request
         data = {
             'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3'),
             'lang': 'en'
         }
         response = client.post(endpoint, data=data, content_type='multipart/form-data', headers=headers)
-        assert response.status_code == 200, f"Request {i + 1} failed unexpectedly with status {response.status_code}"
+        assert response.status_code == HTTPStatus.OK, f"Request {i + 1} failed unexpectedly with status {response.status_code}"
 
-    # The 6th request should also pass as rate limiting is disabled
     data = {
         'file': (io.BytesIO(dummy_mp3_content), 'test_audio.mp3'),
         'lang': 'en'
     }
     response = client.post(endpoint, data=data, content_type='multipart/form-data', headers=headers)
-    assert response.status_code == 200, f"Expected 200, but got {response.status_code}"
-    # assert "Too Many Requests" in response.get_data(as_text=True) # This assertion is no longer valid
+    assert response.status_code == HTTPStatus.OK, f"Expected 200, but got {response.status_code}"
 
 
 # --- Tests for Authentication Endpoints ---
 
 @pytest.fixture
 def auth_tokens(client, mock_db_client):
-    """Fixture to get valid access and refresh tokens."""
-    # Ensure a user exists in the mock DB
     user_id = ObjectId(TEST_USER_ID)
     mock_db_client._users_store_accessor[user_id] = {
         "_id": user_id,
@@ -664,42 +584,39 @@ def auth_tokens(client, mock_db_client):
         "refresh_tokens": []
     }
 
-    # Perform login to get tokens
     login_data = {
         "username": TEST_USER_NAME,
         "password": TEST_PASSWORD
     }
     response = client.post(API_METHOD_AUTH_LOGIN, json=login_data)
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     return json.loads(response.data)
 
 
 def test_auth_login_success(client, mock_db_client):
     user_id = ObjectId(TEST_USER_ID)
-    # Remove this block, as auth_tokens fixture already sets up the user
-    # mock_db_client._users_store_accessor[user_id] = {
-    #     "_id": user_id,
-    #     "user_id": TEST_USER_ID,
-    #     "user_name": TEST_USER_NAME,
-    #     "user_full_name": TEST_USER_FULL_NAME,
-    #     "password_hash": TEST_PASSWORD_HASH,
-    #     "refresh_tokens": []
-    # }
+    mock_db_client._users_store_accessor[user_id] = {
+        "_id": user_id,
+        "user_id": TEST_USER_ID,
+        "user_name": TEST_USER_NAME,
+        "user_full_name": TEST_USER_FULL_NAME,
+        "password_hash": TEST_PASSWORD_HASH,
+        "refresh_tokens": []
+    }
 
     login_data = {
         "username": TEST_USER_NAME,
         "password": TEST_PASSWORD
     }
     response = client.post(API_METHOD_AUTH_LOGIN, json=login_data)
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     data = json.loads(response.data)
     assert "access_token" in data
     assert "refresh_token" in data
     assert data["token_type"] == "Bearer"
     assert data["expires_in"] == config.jwt_access_token_expires_in
 
-    # Verify refresh token stored in DB
-    user_in_db = mock_db_client.get_user_by_id(user_id)  # Use mock method to get updated user
+    user_in_db = mock_db_client.get_user_by_id(user_id)
     assert user_in_db is not None
     assert len(user_in_db["refresh_tokens"]) == 1
     assert bcrypt.verify(data["refresh_token"], user_in_db["refresh_tokens"][0]["token_hash"])
@@ -722,13 +639,13 @@ def test_auth_login_invalid_credentials(client, mock_db_client):
         "password": "wrongpassword"
     }
     response = client.post(API_METHOD_AUTH_LOGIN, json=login_data)
-    assert response.status_code == 401
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert json.loads(response.data) == {"error": "Invalid username or password."}
 
 
 def test_auth_login_missing_fields(client, mock_db_client):
     response = client.post(API_METHOD_AUTH_LOGIN, json={"username": TEST_USER_NAME})
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert json.loads(response.data) == {"error": "Missing username or password."}
 
 
@@ -736,7 +653,7 @@ def test_auth_refresh_success(client, auth_tokens, mock_db_client):
     refresh_token = auth_tokens["refresh_token"]
     headers = {"Authorization": f"Bearer {refresh_token}"}
     response = client.post(API_METHOD_AUTH_REFRESH, headers=headers)
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     data = json.loads(response.data)
     assert "access_token" in data
     assert data["token_type"] == "Bearer"
@@ -746,22 +663,20 @@ def test_auth_refresh_success(client, auth_tokens, mock_db_client):
 def test_auth_refresh_invalid_token(client, mock_db_client):
     headers = {"Authorization": f"Bearer invalid_refresh_token"}
     response = client.post(API_METHOD_AUTH_REFRESH, headers=headers)
-    assert response.status_code == 401
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert json.loads(response.data) == {"error": "Invalid or expired refresh token."}
 
 
 def test_auth_refresh_expired_token(client, auth_tokens, mock_db_client):
-    # Manually expire the refresh token in the mock DB
     user_id = ObjectId(TEST_USER_ID)
-    # Get the actual user object from the mock's internal store
-    user_in_store = mock_db_client.get_user_by_id(user_id)  # Access the actual dict
-    for rt_entry in user_in_store["refresh_tokens"]:  # Modify the actual dict
+    user_in_store = mock_db_client.get_user_by_id(user_id)
+    for rt_entry in user_in_store["refresh_tokens"]:
         rt_entry["expires_at"] = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)
 
     refresh_token = auth_tokens["refresh_token"]
     headers = {"Authorization": f"Bearer {refresh_token}"}
     response = client.post(API_METHOD_AUTH_REFRESH, headers=headers)
-    assert response.status_code == 401
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert json.loads(response.data) == {"error": "Invalid or expired refresh token."}
 
 
@@ -769,10 +684,9 @@ def test_auth_logout_success(client, auth_tokens, mock_db_client):
     refresh_token = auth_tokens["refresh_token"]
     headers = {"Authorization": f"Bearer {refresh_token}"}
     response = client.post(API_METHOD_AUTH_LOGOUT, headers=headers)
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     assert json.loads(response.data) == {"message": "Logout successful."}
 
-    # Verify refresh token is revoked in DB
     user_id = ObjectId(TEST_USER_ID)
     user_in_db = mock_db_client._users_store_accessor[user_id]
     assert user_in_db["refresh_tokens"][0]["revoked"] is True
@@ -781,22 +695,18 @@ def test_auth_logout_success(client, auth_tokens, mock_db_client):
 def test_auth_logout_invalid_token(client, mock_db_client):
     headers = {"Authorization": f"Bearer invalid_refresh_token"}
     response = client.post(API_METHOD_AUTH_LOGOUT, headers=headers)
-    assert response.status_code == 401
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert json.loads(response.data) == {"error": "Invalid refresh token."}
 
 
 # --- Tests for Conversation Management Endpoints ---
 
 def test_get_conversations_success(client, mock_db_client):
-    """Tests successful retrieval of conversations for the authenticated user."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
-
-    # The mock collection is initialized with SAMPLE_CONVERSATION_1 and SAMPLE_CONVERSATION_2
-    # The mock_db_client fixture already sets this up via side_effect.
 
     response = client.get(API_METHOD_CONVERSATIONS, headers=headers)
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     expected_conversations = [
         conversation_to_json_compatible(SAMPLE_CONVERSATION_1),
         conversation_to_json_compatible(SAMPLE_CONVERSATION_2)
@@ -806,16 +716,11 @@ def test_get_conversations_success(client, mock_db_client):
 
 
 def test_get_conversations_pagination(client, mock_db_client):
-    """Tests pagination parameters for conversations."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
-
-    # Simulate the mock collection returning only the second conversation for page 2
-    # The _conversations_store_accessor is already populated by the fixture setup.
-    # The mock_get_conversations side_effect will handle the filtering and pagination.
 
     response = client.get(f"{API_METHOD_CONVERSATIONS}?convPerPage=1&numPage=2", headers=headers)
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
 
     expected_conversations = [conversation_to_json_compatible(SAMPLE_CONVERSATION_2)]
     assert json.loads(response.data) == expected_conversations
@@ -823,77 +728,62 @@ def test_get_conversations_pagination(client, mock_db_client):
 
 
 def test_get_conversations_invalid_pagination(client, mock_db_client):
-    """Tests invalid pagination parameters."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
     response = client.get(f"{API_METHOD_CONVERSATIONS}?convPerPage=-1&numPage=abc", headers=headers)
-    assert response.status_code == 400
-    assert "Invalid pagination parameters. 'convPerPage' and 'numPage' must be integers." in json.loads(response.data)[
-        "error"]
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Invalid pagination parameters. 'convPerPage' and 'numPage' must be integers." in json.loads(response.data)["error"]
 
 
 def test_get_conversations_db_error(client, mock_db_client):
-    """Tests database error during conversation retrieval."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
     mock_db_client.get_conversations.side_effect = PyMongoError("DB connection lost")
     response = client.get(API_METHOD_CONVERSATIONS, headers=headers)
-    assert response.status_code == 500
-    assert "Database error while fetching conversations." in json.loads(response.data)["error"]
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert "Database error occurred." in json.loads(response.data)["error"]
 
 
 def test_get_conversation_by_id_success(client, mock_db_client):
-    """Tests successful retrieval of a specific conversation."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
-    # The mock_db_client fixture's side_effect for get_conversation_by_id will handle returning the correct conversation.
 
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", headers=headers)
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     assert json.loads(response.data) == conversation_to_json_compatible(SAMPLE_CONVERSATION_1)
     mock_db_client.get_conversation_by_id.assert_called_once_with(TEST_CONVERSATION_ID_1, user_id=TEST_USER_ID)
 
 
 def test_get_conversation_by_id_not_found(client, mock_db_client):
-    """Tests retrieval of a non-existent conversation."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
-    # The mock_db_client fixture's side_effect for get_conversation_by_id will return None if not found.
-    # The check_conversation_exists side_effect will return False if not found.
 
-    response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{str(ObjectId())}", headers=headers)  # Use a random ObjectId
-    assert response.status_code == 404
+    response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{str(ObjectId())}", headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND
     assert "Conversation not found" in json.loads(response.data)["error"]
 
 
 def test_get_conversation_by_id_invalid_id_format(client, mock_db_client):
-    """Tests retrieval with an invalid ObjectId format."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}invalid_id_format", headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Invalid conversation ID format." in json.loads(response.data)["error"]
 
 
 def test_get_conversation_by_id_forbidden(client, mock_db_client):
-    """Tests retrieval of a conversation owned by another user."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
 
-    # The mock_db_client fixture's side_effect for get_conversation_by_id will return None for the current user,
-    # but check_conversation_exists will return True, leading to a 403.
-
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_OTHER_USER}", headers=headers)
-    assert response.status_code == 403
-    assert "Forbidden: User does not have access to this conversation." in json.loads(response.data)["error"]
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "User does not have access to this conversation." in json.loads(response.data)["error"]
 
 
 def test_get_conversation_by_id_db_error(client, mock_db_client):
-    """Tests database error during specific conversation retrieval."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
     mock_db_client.get_conversation_by_id.side_effect = PyMongoError("DB connection lost")
     response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", headers=headers)
-    assert response.status_code == 500
-    assert "Database error while fetching conversation." in json.loads(response.data)["error"]
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert "Database error occurred." in json.loads(response.data)["error"]
 
 
 def test_create_conversation_success(client, mock_db_client):
-    """Tests successful creation of a new conversation."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
     new_conversation_data = {
@@ -904,14 +794,9 @@ def test_create_conversation_success(client, mock_db_client):
         ]
     }
 
-    # The mock_db_client fixture's side_effect for create_conversation already hardcodes
-    # created_at=TEST_DATETIME_NEW_MSG, so there's no need to (and we must not) patch
-    # datetime.datetime here: api.py's _prepare_response_data() also uses the same
-    # `datetime` name for isinstance() checks when serializing the response, and replacing
-    # it with a MagicMock breaks that isinstance() check.
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps(new_conversation_data), headers=headers)
 
-    assert response.status_code == 201
+    assert response.status_code == HTTPStatus.CREATED
     response_data = json.loads(response.data)
     assert "_id" in response_data
     assert response_data["user_id"] == TEST_USER_ID
@@ -925,47 +810,39 @@ def test_create_conversation_success(client, mock_db_client):
 
 
 def test_create_conversation_invalid_data(client, mock_db_client):
-    """Tests creation with invalid input data."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
 
-    # Test missing title
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps({"messages": []}), headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Title is required and must be a string." in json.loads(response.data)["error"]
 
-    # Test invalid messages type
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps({"title": "Test", "messages": "not a list"}),
                            headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Messages must be a list." in json.loads(response.data)["error"]
 
-    # Test invalid message structure (missing content)
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps(
         {"title": "Test", "messages": [{"role": "user", "timestamp": "2023-10-28T10:00:00+00:00"}]}), headers=headers)
-    assert response.status_code == 400
-    assert "Each message must have 'role', 'content', and 'timestamp'." in json.loads(response.data)[
-        "error"]
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Each message must have 'role', 'content', and 'timestamp'." in json.loads(response.data)["error"]
 
-    # Test invalid timestamp format
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps({
         "title": "Test",
         "messages": [{"role": "user", "content": "hi", "timestamp": "invalid-date"}]
     }), headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Message timestamp must be in ISO 8601 format." in json.loads(response.data)["error"]
 
-    # Test invalid message role
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps({
         "title": "Test",
         "messages": [{"role": "invalid", "content": "hi", "timestamp": "2023-10-28T10:00:00Z"}]
     }), headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Message role must be 'user' or 'assistant'." in json.loads(response.data)["error"]
 
 
 def test_create_conversation_db_error(client, mock_db_client):
-    """Tests database error during conversation creation."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
     new_conversation_data = {
@@ -977,12 +854,11 @@ def test_create_conversation_db_error(client, mock_db_client):
     }
     mock_db_client.create_conversation.side_effect = PyMongoError("DB write error")
     response = client.post(API_METHOD_CONVERSATIONS, data=json.dumps(new_conversation_data), headers=headers)
-    assert response.status_code == 500
-    assert "Database error while creating conversation." in json.loads(response.data)["error"]
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert "Database error occurred." in json.loads(response.data)["error"]
 
 
 def test_update_conversation_success(client, mock_db_client):
-    """Tests successful partial update of a conversation."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
     update_data = {
@@ -993,16 +869,13 @@ def test_update_conversation_success(client, mock_db_client):
         ]
     }
 
-    # Ensure the conversation exists in the mock DB
     original_conv_id = ObjectId(TEST_CONVERSATION_ID_1)
     mock_db_client._conversations_store_accessor[original_conv_id] = SAMPLE_CONVERSATION_1.copy()
-    # The mock_db_client fixture's side_effect for update_conversation will handle the update.
-    # The mock_db_client fixture's side_effect for get_conversation_by_id will return the updated conversation.
 
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", data=json.dumps(update_data),
                             headers=headers)
 
-    assert response.status_code == 200
+    assert response.status_code == HTTPStatus.OK
     response_data = json.loads(response.data)
     assert "_id" in response_data
     assert response_data["user_id"] == TEST_USER_ID
@@ -1011,85 +884,69 @@ def test_update_conversation_success(client, mock_db_client):
 
     mock_db_client.update_conversation.assert_called_once_with(TEST_CONVERSATION_ID_1, TEST_USER_ID, update_data)
 
-    # Verify the document in the mock store was actually updated
     updated_doc_in_store = mock_db_client.get_conversation_by_id(TEST_CONVERSATION_ID_1, user_id=TEST_USER_ID)
     assert updated_doc_in_store["title"] == update_data["title"]
     assert updated_doc_in_store["messages"] == update_data["messages"]
 
 
 def test_update_conversation_not_found(client, mock_db_client):
-    """Tests updating a non-existent conversation."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
     update_data = {"title": "Non Existent"}
 
-    # The mock_db_client fixture's side_effect for update_conversation will return False if not found.
-    # The check_conversation_exists side_effect will return False if not found.
-
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{str(ObjectId())}", json=update_data, headers=headers)
-    assert response.status_code == 404
+    assert response.status_code == HTTPStatus.NOT_FOUND
     assert "Conversation not found" in json.loads(response.data)["error"]
 
 
 def test_update_conversation_invalid_id_format(client, mock_db_client):
-    """Tests updating with an invalid ObjectId format."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
     update_data = {"title": "Invalid ID"}
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}invalid_id_format", json=update_data, headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Invalid conversation ID format." in json.loads(response.data)["error"]
 
 
 def test_update_conversation_forbidden(client, mock_db_client):
-    """Tests updating a conversation owned by another user."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
     update_data = {"title": "Forbidden Update"}
 
-    # The mock_db_client fixture's side_effect for update_conversation will return False for the current user,
-    # but check_conversation_exists will return True, leading to a 403.
-
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_OTHER_USER}", json=update_data,
                             headers=headers)
-    assert response.status_code == 403
-    assert "Forbidden: User does not have access to modify this conversation." in json.loads(response.data)["error"]
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "User does not have access to modify this conversation." in json.loads(response.data)["error"]
 
 
 def test_update_conversation_invalid_data(client, mock_db_client):
-    """Tests update with invalid input data."""
     headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
                'Content-Type': 'application/json'}
 
-    # Test invalid title type
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", json={"title": 123},
                             headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Title must be a string." in json.loads(response.data)["error"]
 
-    # Test invalid messages type
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}",
                             json={"messages": "not a list"}, headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Messages must be a list." in json.loads(response.data)["error"]
 
-    # Test invalid message structure (missing content)
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}",
                             json={"messages": [{"role": "user", "timestamp": "2023-10-28T10:00:00+00:00"}]},
                             headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Each message must have 'role', 'content', and 'timestamp'." in json.loads(response.data)["error"]
 
-    # Test invalid timestamp format
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", json={
         "messages": [{"role": "user", "content": "hi", "timestamp": "invalid-date"}]
     }, headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Message timestamp must be in ISO 8601 format." in json.loads(response.data)["error"]
 
-    # Test invalid message role
     response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", json={
         "messages": [{"role": "invalid", "content": "hi", "timestamp": "2023-10-28T10:00:00Z"}]
     }, headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Message role must be 'user' or 'assistant'." in json.loads(response.data)["error"]
