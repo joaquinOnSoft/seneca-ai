@@ -18,12 +18,16 @@ from flask_limiter.util import get_remote_address
 from passlib.hash import bcrypt
 from pymongo.errors import PyMongoError
 from pythonjsonlogger.json import JsonFormatter
+from werkzeug.exceptions import HTTPException
 
 from seneca.api.database import MongoDatabase
 from seneca.utils.config import config
 from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401
 
 H265 = "HS256"
+MAX_CONV_PER_PAGE = 100
+MAX_USER_ID_LENGTH = 128
+API_KEY_DEFAULT_USER = "api_key_user"
 
 
 # --- Custom Exception Classes ---
@@ -195,6 +199,33 @@ def validate_message_structure(messages):
     return True, None
 
 
+def _ensure_db_connected():
+    if not db_client.is_connected():
+        api.logger.error("MongoDB is not connected.")
+        raise ServiceUnavailableError("Database service unavailable.")
+
+
+def _validate_conversation_id(_id):
+    if not ObjectId.is_valid(_id):
+        api.logger.warning(f"Invalid ObjectId format for _id: {_id}")
+        raise BadRequestError("Invalid conversation ID format.")
+
+
+def _raise_forbidden_or_not_found(_id, forbidden_message):
+    """Called when an operation filtered by owner matched nothing: tells apart 403 from 404."""
+    if db_client.check_conversation_exists(_id):
+        api.logger.warning(f"User {g.user_id} attempted to access conversation {_id} owned by another user.")
+        raise ForbiddenError(forbidden_message)
+    api.logger.info(f"Conversation with _id: {_id} not found for user: {g.user_id}")
+    raise NotFoundError("Conversation not found.")
+
+
+def _conversation_response(conversation, status=HTTPStatus.OK, headers=None):
+    response = Response(json.dumps(_prepare_response_data(conversation), cls=MongoJsonEncoder),
+                        mimetype='application/json')
+    return response, status, headers or {}
+
+
 # --- JWT and Refresh Token Utilities ---
 def generate_jwt(user_id, user_name, expires_in_seconds=config.jwt_access_token_expires_in):
     payload = {
@@ -243,7 +274,8 @@ swagger_config = {
             "type": "apiKey",
             "name": "X-SENECA-AI-API-KEY",
             "in": "header",
-            "description": "API Key required for authentication (for specific integrations)"
+            "description": "API Key required for authentication (for specific integrations). "
+                           "Send the optional X-SENECA-AI-USER-ID header to act on behalf of a specific user."
         },
         "BearerAuth": {
             "type": "apiKey",
@@ -272,13 +304,16 @@ swagger_config = {
                 "title": {"type": "string", "description": "Title of the conversation"},
                 "created_at": {"type": "string", "format": "date-time",
                                "description": "ISO 8601 timestamp when the conversation was created"},
+                "updated_at": {"type": "string", "format": "date-time",
+                               "description": "ISO 8601 timestamp of the last modification of the conversation"},
                 "messages": {
                     "type": "array",
                     "items": {"$ref": "#/definitions/Message"},
-                    "description": "List of messages in the conversation"
+                    "description": "List of messages in the conversation "
+                                   "(omitted in listings unless includeMessages=true)"
                 }
             },
-            "required": ["_id", "user_id", "title", "created_at", "messages"]
+            "required": ["_id", "user_id", "title", "created_at"]
         },
         "NewConversationSchema": {
             "type": "object",
@@ -299,9 +334,20 @@ swagger_config = {
                 "messages": {
                     "type": "array",
                     "items": {"$ref": "#/definitions/Message"},
-                    "description": "New list of messages to replace or append (optional). If provided, it will replace the existing messages array."
+                    "description": "New list of messages (optional). If provided, it will replace the existing messages array."
                 }
             }
+        },
+        "AppendMessagesSchema": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/Message"},
+                    "description": "Messages to append at the end of the conversation"
+                }
+            },
+            "required": ["messages"]
         },
         "AuthLoginSchema": {
             "type": "object",
@@ -358,6 +404,16 @@ def handle_api_exception(error):
     response.status_code = error.status_code
     return response
 
+@api.errorhandler(HTTPException)
+def handle_http_exception(error):
+    # Keep the original status code (400, 404, 405, 415, 429...) instead of turning it into a 500
+    api.logger.warning(f"HTTP Exception: {error.code} {error.name}",
+                       extra={'event': 'http_exception', 'status_code': error.code})
+    response = error.get_response()
+    response.data = json.dumps({"error": error.description})
+    response.content_type = "application/json"
+    return response
+
 @api.errorhandler(PyMongoError)
 def handle_mongo_error(error):
     api.logger.error(f"MongoDB Error: {error}", exc_info=True, extra={'event': 'mongodb_error'})
@@ -388,8 +444,12 @@ def validate_api_key():
         api.logger.warning("Invalid API Key provided.", extra={'event': 'auth_failed', 'reason': 'invalid_key'})
         raise UnauthorizedError("Unauthorized: Invalid API Key")
     
-    g.user_id = "api_key_user"
-    g.user_name = "api_key_user"
+    # A trusted integration may act on behalf of a specific user
+    user_id = request.headers.get('X-SENECA-AI-USER-ID', '').strip()
+    if len(user_id) > MAX_USER_ID_LENGTH:
+        raise BadRequestError(f"X-SENECA-AI-USER-ID must not exceed {MAX_USER_ID_LENGTH} characters.")
+    g.user_id = user_id or API_KEY_DEFAULT_USER
+    g.user_name = g.user_id
     return None
 
 
@@ -809,6 +869,12 @@ def get_conversations():
         required: false
         default: 1
         description: "Page number (1-based)."
+      - name: includeMessages
+        in: query
+        type: boolean
+        required: false
+        default: false
+        description: "Include the messages of each conversation in the response."
     security:
       - BearerAuth: []
       - APIKeyHeader: []
@@ -827,9 +893,7 @@ def get_conversations():
         description: "Internal Server Error: An unexpected error occurred."
     """
     api.logger.info(f"Request to get conversations for user: {g.user_id}")
-    if not db_client.is_connected():
-        api.logger.error("MongoDB is not connected.")
-        raise ServiceUnavailableError("Database service unavailable.")
+    _ensure_db_connected()
 
     try:
         conv_per_page = int(request.args.get('convPerPage', 20))
@@ -841,10 +905,16 @@ def get_conversations():
     if conv_per_page <= 0 or num_page <= 0:
         raise BadRequestError("Pagination parameters 'convPerPage' and 'numPage' must be positive integers.")
 
+    if conv_per_page > MAX_CONV_PER_PAGE:
+        raise BadRequestError(f"Pagination parameter 'convPerPage' must not exceed {MAX_CONV_PER_PAGE}.")
+
+    include_messages = request.args.get('includeMessages', 'false').lower() in ('true', '1')
+
     skip = (num_page - 1) * conv_per_page
     limit = conv_per_page
 
-    conversations = db_client.get_conversations(g.user_id, skip=skip, limit=limit)
+    conversations = db_client.get_conversations(g.user_id, skip=skip, limit=limit,
+                                                include_messages=include_messages)
 
     api.logger.info(f"Found {len(conversations)} conversations for user {g.user_id} on page {num_page}.")
     return Response(json.dumps(_prepare_response_data(conversations), cls=MongoJsonEncoder),
@@ -885,26 +955,16 @@ def get_conversation_by_id(_id):
         description: "Internal Server Error: An unexpected error occurred."
     """
     api.logger.info(f"Request to get conversation with _id: {_id} for user: {g.user_id}")
-    if not db_client.is_connected():
-        api.logger.error("MongoDB is not connected.")
-        raise ServiceUnavailableError("Database service unavailable.")
-
-    if not ObjectId.is_valid(_id):
-        api.logger.warning(f"Invalid ObjectId format for _id: {_id}")
-        raise BadRequestError("Invalid conversation ID format.")
+    _ensure_db_connected()
+    _validate_conversation_id(_id)
 
     conversation = db_client.get_conversation_by_id(_id, user_id=g.user_id)
 
     if not conversation:
-        if db_client.check_conversation_exists(_id):
-            api.logger.warning(f"User {g.user_id} attempted to access conversation {_id} owned by another user.")
-            raise ForbiddenError("User does not have access to this conversation.")
-        api.logger.info(f"Conversation with _id: {_id} not found for user: {g.user_id}")
-        raise NotFoundError("Conversation not found.")
+        _raise_forbidden_or_not_found(_id, "User does not have access to this conversation.")
 
     api.logger.info(f"Conversation {_id} retrieved successfully for user {g.user_id}.")
-    return Response(json.dumps(_prepare_response_data(conversation), cls=MongoJsonEncoder),
-                    mimetype='application/json'), HTTPStatus.OK
+    return _conversation_response(conversation)
 
 
 @api.route('/senecaai/v1/conversations', methods=['POST'])
@@ -940,10 +1000,7 @@ def create_conversation():
         description: "Internal Server Error: An unexpected error occurred."
     """
     api.logger.info(f"Request to create new conversation for user: {g.user_id}")
-
-    if not db_client.is_connected():
-        api.logger.error("MongoDB is not connected.")
-        raise ServiceUnavailableError("Database service unavailable.")
+    _ensure_db_connected()
 
     data = request.get_json()
     if not data:
@@ -952,7 +1009,7 @@ def create_conversation():
     title = data.get('title')
     messages = data.get('messages')
 
-    if not title or not isinstance(title, str):
+    if not isinstance(title, str) or not title.strip():
         raise BadRequestError("Title is required and must be a string.")
 
     is_valid_messages, error_msg = validate_message_structure(messages)
@@ -963,8 +1020,7 @@ def create_conversation():
 
     location_header = f"{request.url}/{new_conversation['_id']}"
     api.logger.info(f"Conversation created successfully with _id: {new_conversation['_id']} for user {g.user_id}.")
-    return Response(json.dumps(_prepare_response_data(new_conversation), cls=MongoJsonEncoder),
-                    mimetype='application/json'), HTTPStatus.CREATED, {'Location': location_header}
+    return _conversation_response(new_conversation, HTTPStatus.CREATED, {'Location': location_header})
 
 
 @api.route('/senecaai/v1/conversations/<_id>', methods=['PATCH'])
@@ -1005,13 +1061,8 @@ def update_conversation(_id):
         description: "Internal Server Error: An unexpected error occurred."
     """
     api.logger.info(f"Request to update conversation with _id: {_id} for user: {g.user_id}")
-    if not db_client.is_connected():
-        api.logger.error("MongoDB is not connected.")
-        raise ServiceUnavailableError("Database service unavailable.")
-
-    if not ObjectId.is_valid(_id):
-        api.logger.warning(f"Invalid ObjectId format for _id: {_id}")
-        raise BadRequestError("Invalid conversation ID format.")
+    _ensure_db_connected()
+    _validate_conversation_id(_id)
 
     data = request.get_json()
     if not data:
@@ -1021,6 +1072,8 @@ def update_conversation(_id):
     if 'title' in data:
         if not isinstance(data['title'], str):
             raise BadRequestError("Title must be a string.")
+        if not data['title'].strip():
+            raise BadRequestError("Title must not be empty.")
         update_fields['title'] = data['title']
 
     if 'messages' in data:
@@ -1035,17 +1088,115 @@ def update_conversation(_id):
     updated = db_client.update_conversation(_id, g.user_id, update_fields)
 
     if not updated:
-        if db_client.check_conversation_exists(_id):
-            api.logger.warning(f"User {g.user_id} attempted to update conversation {_id} owned by another user.")
-            raise ForbiddenError("User does not have access to modify this conversation.")
-
-        api.logger.info(f"Conversation with _id: {_id} not found for user: {g.user_id}")
-        raise NotFoundError("Conversation not found.")
+        _raise_forbidden_or_not_found(_id, "User does not have access to modify this conversation.")
 
     updated_conversation = db_client.get_conversation_by_id(_id)
     api.logger.info(f"Conversation {_id} updated successfully for user {g.user_id}.")
-    return Response(json.dumps(_prepare_response_data(updated_conversation), cls=MongoJsonEncoder),
-                    mimetype='application/json'), HTTPStatus.OK
+    return _conversation_response(updated_conversation)
+
+
+@api.route('/senecaai/v1/conversations/<_id>/messages', methods=['POST'])
+def append_conversation_messages(_id):
+    """
+    Append Messages to Conversation
+    Appends one or more messages at the end of an existing conversation of the authenticated user,
+    without having to send the whole conversation again.
+    ---
+    parameters:
+      - name: _id
+        in: path
+        type: string
+        required: true
+        description: "Unique identifier of the conversation (MongoDB ObjectId)."
+      - name: body
+        in: body
+        required: true
+        schema:
+          $ref: '#/definitions/AppendMessagesSchema'
+    security:
+      - BearerAuth: []
+      - APIKeyHeader: []
+    responses:
+      200:
+        description: "The conversation including the appended messages."
+        schema:
+          $ref: '#/definitions/ConversationSchema'
+      400:
+        description: "Bad Request: Invalid messages provided or invalid conversation ID format."
+      401:
+        description: "Unauthorized: API Key or JWT missing or invalid."
+      403:
+        description: "Forbidden: User does not have access to modify this conversation."
+      404:
+        description: "Not Found: Conversation with the given ID not found."
+      500:
+        description: "Internal Server Error: An unexpected error occurred."
+    """
+    api.logger.info(f"Request to append messages to conversation with _id: {_id} for user: {g.user_id}")
+    _ensure_db_connected()
+    _validate_conversation_id(_id)
+
+    data = request.get_json()
+    if not data or 'messages' not in data:
+        raise BadRequestError("No messages provided.")
+
+    messages = data['messages']
+    is_valid_messages, error_msg = validate_message_structure(messages)
+    if not is_valid_messages:
+        raise BadRequestError(error_msg)
+    if not messages:
+        raise BadRequestError("Messages must not be empty.")
+
+    appended = db_client.append_messages(_id, g.user_id, messages)
+
+    if not appended:
+        _raise_forbidden_or_not_found(_id, "User does not have access to modify this conversation.")
+
+    updated_conversation = db_client.get_conversation_by_id(_id)
+    api.logger.info(f"{len(messages)} messages appended to conversation {_id} for user {g.user_id}.")
+    return _conversation_response(updated_conversation)
+
+
+@api.route('/senecaai/v1/conversations/<_id>', methods=['DELETE'])
+def delete_conversation(_id):
+    """
+    Delete Conversation
+    Deletes a conversation of the authenticated user.
+    ---
+    parameters:
+      - name: _id
+        in: path
+        type: string
+        required: true
+        description: "Unique identifier of the conversation (MongoDB ObjectId)."
+    security:
+      - BearerAuth: []
+      - APIKeyHeader: []
+    responses:
+      204:
+        description: "The conversation was deleted successfully."
+      400:
+        description: "Bad Request: Invalid conversation ID format."
+      401:
+        description: "Unauthorized: API Key or JWT missing or invalid."
+      403:
+        description: "Forbidden: User does not have access to delete this conversation."
+      404:
+        description: "Not Found: Conversation with the given ID not found."
+      500:
+        description: "Internal Server Error: An unexpected error occurred."
+    """
+    api.logger.info(f"Request to delete conversation with _id: {_id} for user: {g.user_id}")
+    _ensure_db_connected()
+    _validate_conversation_id(_id)
+
+    deleted = db_client.delete_conversation(_id, g.user_id)
+
+    if not deleted:
+        _raise_forbidden_or_not_found(_id, "User does not have access to delete this conversation.")
+
+    api.logger.info(f"Conversation {_id} deleted successfully for user {g.user_id}.")
+    return Response(status=HTTPStatus.NO_CONTENT)
 
 
 if __name__ == '__main__':

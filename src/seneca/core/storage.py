@@ -1,9 +1,14 @@
 """
-src/seneca/core/storage.py – Lightweight JSON-based conversation store.
+src/seneca/core/storage.py – Conversation stores.
 
-Conversations are persisted to ``~/.seneca/conversations.json`` so
-that the sidebar list survives across sessions.  The format is
-intentionally simple – no external DB dependency.
+The module-level functions implement a lightweight JSON store:
+conversations are persisted to ``~/.seneca/conversations.json`` so
+that the sidebar list survives across sessions, with no external DB
+dependency.
+
+:func:`create_conversation_store` returns the store selected with
+``CONVERSATION_STORAGE``: the Seneca-AI REST API (``api``, default) or
+the local JSON file (``local``).
 """
 
 from __future__ import annotations
@@ -98,3 +103,44 @@ def delete_all() -> None:
     """Wipe all stored conversations."""
     _ensure_store()
     _STORE_FILE.write_text("[]", encoding="utf-8")
+
+
+def delete_conversation(conv_id: str) -> None:
+    """Remove the conversation with id *conv_id*, if stored."""
+    _ensure_store()
+    try:
+        raw = json.loads(_STORE_FILE.read_text(encoding="utf-8"))
+        remaining = [d for d in raw if d["id"] != conv_id]
+        _STORE_FILE.write_text(
+            json.dumps(remaining, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.error("Could not delete conversation: %s", exc)
+
+
+class LocalConversationStore:
+    """Conversation store backed by the local JSON file."""
+
+    def load_conversations(self, limit: int = 20) -> list[Conversation]:
+        return load_conversations(limit)
+
+    def ensure_messages(self, conv: Conversation) -> None:
+        """Messages are always loaded with the local store."""
+
+    def save_conversation(self, conv: Conversation) -> None:
+        save_conversation(conv)
+
+    def delete_conversation(self, conv: Conversation) -> None:
+        delete_conversation(conv.id)
+
+
+def create_conversation_store():
+    """Return the conversation store selected by ``CONVERSATION_STORAGE``."""
+    from seneca.utils.config import config
+
+    if config.conversation_storage == "local":
+        return LocalConversationStore()
+    # Imported lazily: the API store pulls in the HTTP client
+    from seneca.core.api_storage import ApiConversationStore
+    return ApiConversationStore.from_config()

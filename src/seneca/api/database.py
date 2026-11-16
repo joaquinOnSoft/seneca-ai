@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from bson.objectid import ObjectId
 # noinspection PyUnresolvedReferences
 from passlib.hash import bcrypt
-from pymongo import MongoClient
+from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.errors import ConnectionFailure, PyMongoError
 
 from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401 — "Applies the patch via side effect
@@ -30,7 +30,7 @@ class MongoDatabase:
         self.logger.setLevel(logging.INFO)
 
     def connect(self):
-        if self._client and self._db:
+        if self._client is not None and self._db is not None:
             self.logger.info("MongoDB client already connected.")
             return
 
@@ -40,6 +40,7 @@ class MongoDatabase:
             self.conversations_collection = self._db.conversations
             self.users_collection = self._db.users
             self.logger.info("MongoDB connected successfully.")
+            self._ensure_indexes()
         except ConnectionFailure as e:
             self.logger.error(f"Failed to connect to MongoDB: {e}", exc_info=True)
             self._client = None
@@ -54,6 +55,16 @@ class MongoDatabase:
             self.conversations_collection = None
             self.users_collection = None
             raise
+
+    def _ensure_indexes(self):
+        # Index creation is idempotent; a failure must not prevent the API from starting
+        try:
+            self.conversations_collection.create_index(
+                [("user_id", ASCENDING), ("created_at", DESCENDING)],
+                name="user_id_created_at"
+            )
+        except PyMongoError as e:
+            self.logger.warning(f"Could not create MongoDB indexes: {e}")
 
     def is_connected(self):
         if self._is_mock: # Mock instances are always considered "connected" for testing purposes
@@ -70,11 +81,12 @@ class MongoDatabase:
             self.logger.info("MongoDB connection closed.")
 
     # --- Conversation Methods ---
-    def get_conversations(self, user_id, skip=0, limit=20):
+    def get_conversations(self, user_id, skip=0, limit=20, include_messages=False):
         if self.conversations_collection is None:
             raise PyMongoError("Conversations collection not initialized.")
+        projection = None if include_messages else {"messages": 0}
         return list(self.conversations_collection.find(
-            {"user_id": user_id}
+            {"user_id": user_id}, projection
         ).sort("created_at", -1).skip(skip).limit(limit))
 
     def get_conversation_by_id(self, conv_id_str, user_id=None):
@@ -93,10 +105,12 @@ class MongoDatabase:
     def create_conversation(self, user_id, title, messages):
         if self.conversations_collection is None:
             raise PyMongoError("Conversations collection not initialized.")
+        now = datetime.now(timezone.utc)
         new_conversation = {
             "user_id": user_id,
             "title": title,
-            "created_at": datetime.now(timezone.utc),
+            "created_at": now,
+            "updated_at": now,
             "messages": messages
         }
         result = self.conversations_collection.insert_one(new_conversation)
@@ -108,9 +122,27 @@ class MongoDatabase:
             raise PyMongoError("Conversations collection not initialized.")
         result = self.conversations_collection.update_one(
             {"_id": ObjectId(conv_id_str), "user_id": user_id},
-            {"$set": update_fields}
+            {"$set": {**update_fields, "updated_at": datetime.now(timezone.utc)}}
         )
         return result.matched_count > 0
+
+    def append_messages(self, conv_id_str, user_id, messages):
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        result = self.conversations_collection.update_one(
+            {"_id": ObjectId(conv_id_str), "user_id": user_id},
+            {"$push": {"messages": {"$each": messages}},
+             "$set": {"updated_at": datetime.now(timezone.utc)}}
+        )
+        return result.matched_count > 0
+
+    def delete_conversation(self, conv_id_str, user_id):
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        result = self.conversations_collection.delete_one(
+            {"_id": ObjectId(conv_id_str), "user_id": user_id}
+        )
+        return result.deleted_count > 0
 
     # --- User/Auth Methods ---
     def get_user_by_username(self, username):

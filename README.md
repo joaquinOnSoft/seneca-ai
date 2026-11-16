@@ -38,10 +38,15 @@ seneca-ai/
 │   └── settings.py          # UI constants & layout values
 ├── src/
 │   └── seneca/
+│       ├── api/
+│       │   ├── api.py           # Flask REST API (STT, auth, conversations)
+│       │   ├── client.py        # Typed HTTP client for the REST API
+│       │   └── database.py      # MongoDB access layer
 │       ├── core/
 │       │   ├── agent.py         # LangChain AI agent (streaming)
 │       │   ├── conversation.py  # Domain models (Message, Conversation)
-│       │   └── storage.py       # JSON persistence (~/.seneca/)
+│       │   ├── storage.py       # Conversation stores (JSON in ~/.seneca/ + factory)
+│       │   └── api_storage.py   # Conversation store backed by the REST API
 │       ├── i18n/
 │       │   └── locale.py        # Babel-backed i18n helper
 │       ├── ui/
@@ -55,6 +60,8 @@ seneca-ai/
 │           └── audio.py         # SpeechRecognition wrapper
 ├── tests/
 │   ├── unit/                # Pure logic tests (no LLM, no UI)
+│   ├── seneca/api/          # REST API, HTTP client and MongoDB layer tests (mocked)
+│   ├── seneca/core/         # API-backed conversation store tests (mocked)
 │   └── integration/         # LLM integration tests (require credentials)
 ├── .env.example
 ├── requirements.txt
@@ -128,18 +135,78 @@ python main.py
 
 ---
 
+## Conversation storage
+
+Conversations are saved through the Seneca AI REST API in MongoDB
+(`CONVERSATION_STORAGE=api`, the default). Set `CONVERSATION_STORAGE=local`
+to keep them in `~/.seneca/conversations.json` instead.
+
+The desktop app authenticates with `SENECA_AI_API_KEY` and stores the
+conversations on behalf of `SENECA_USER_ID` (sent in the
+`X-SENECA-AI-USER-ID` header). If it is empty, they are stored under the
+generic user `api_key_user`.
+
+| Method   | Resource                                     | Description                                                       |
+|----------|----------------------------------------------|-------------------------------------------------------------------|
+| `GET`    | `/senecaai/v1/conversations`                 | Paginated list, newest first (`convPerPage` ≤ 100, `numPage`). Messages only with `includeMessages=true` |
+| `GET`    | `/senecaai/v1/conversations/{id}`            | One conversation with all its messages                            |
+| `POST`   | `/senecaai/v1/conversations`                 | Create a conversation (`201` + `Location` header)                 |
+| `PATCH`  | `/senecaai/v1/conversations/{id}`            | Change `title` and/or replace `messages`                          |
+| `POST`   | `/senecaai/v1/conversations/{id}/messages`   | Append messages at the end of the conversation                    |
+| `DELETE` | `/senecaai/v1/conversations/{id}`            | Delete a conversation (`204`)                                     |
+
+The full Swagger documentation is served at `http://localhost:1414/apidocs`.
+
+---
+
 ## Running Tests
 
+The tests use [pytest](https://docs.pytest.org/). `pyproject.toml` already
+adds `src/` to the Python path, so no `PYTHONPATH` or `pip install -e .` is
+needed. Run every command from the project root with the virtual environment
+activated.
+
+### Prerequisites
+
+1. Install the dependencies (step 2 of the *Quick Start*).
+2. Create the `.env` file (`cp .env.example .env`). `JWT_SECRET_KEY` must
+   have a value: the configuration refuses to load without it.
+
+The API, client, database and storage tests mock MongoDB, the Whisper model
+and the HTTP calls: **no Docker container, database or API server is
+needed**.
+
+### Commands
+
 ```bash
+# All the tests
+# (integration tests are skipped unless OPENAI_API_KEY or ANTHROPIC_API_KEY is set)
+pytest
+
 # Unit tests only (no credentials needed)
 pytest tests/unit/
 
-# All tests including integration (requires LLM credentials)
-pytest
+# REST API, HTTP client and MongoDB layer
+pytest tests/seneca/api/
 
-# With coverage report
-pytest --cov=seneca tests/unit/
+# API-backed conversation store
+pytest tests/seneca/core/
+
+# A single file, test or group of tests
+pytest tests/seneca/api/test_api.py
+pytest tests/seneca/api/test_api.py::test_delete_conversation_success
+pytest -k conversation                 # tests whose name contains "conversation"
+
+# Quieter output / stop at the first failure
+pytest -q
+pytest -x
+
+# Coverage report (requires: pip install pytest-cov)
+pytest --cov=seneca --cov-report=term-missing
 ```
+
+On Windows, the same commands work in PowerShell once the virtual
+environment is activated (`.venv\Scripts\activate`).
 
 ---
 

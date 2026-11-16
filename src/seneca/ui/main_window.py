@@ -44,7 +44,7 @@ from config.settings import (
 )
 from seneca.core.agent import SenecaAgent
 from seneca.core.conversation import Conversation, Role
-from seneca.core import storage
+from seneca.core.storage import create_conversation_store
 from seneca.i18n.locale import I18n
 from seneca.ui.chat_area import ChatArea
 from seneca.ui.input_bar import InputBar
@@ -76,7 +76,8 @@ class MainWindow(ctk.CTk):
         self._i18n = I18n(config.app_locale)
         self._agent = SenecaAgent()
         self._active_conversation: Conversation = Conversation()
-        self._history: list[Conversation] = storage.load_conversations(
+        self._store = create_conversation_store()
+        self._history: list[Conversation] = self._store.load_conversations(
             config.max_conversations
         )
         self._current_bubble: ChatArea.AssistantBubble | None | object = None  # AssistantBubble | None | _BUBBLE_PENDING
@@ -246,6 +247,7 @@ class MainWindow(ctk.CTk):
         """Replay a historical conversation in the chat area."""
         self._agent.cancel()
         self._agent.reset()
+        self._store.ensure_messages(conv)  # history items may only hold a summary
         self._active_conversation = conv
         self._chat.clear()
         self._chat.hide_thinking_message() # Ensure thinking message is hidden
@@ -320,7 +322,7 @@ class MainWindow(ctk.CTk):
     def _on_done(self, full_reply: str) -> None:
         """Finalise a completed reply."""
         self._active_conversation.add_message(Role.ASSISTANT, full_reply)
-        storage.save_conversation(self._active_conversation)
+        self._store.save_conversation(self._active_conversation)
 
         # Update history list
         if self._active_conversation not in self._history:

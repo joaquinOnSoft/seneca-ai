@@ -99,6 +99,9 @@ SAMPLE_CONVERSATION_OTHER_USER = {
 def conversation_to_json_compatible(conv):
     return _prepare_response_data(conv)
 
+def _without_messages(conv):
+    return {k: v for k, v in conv.items() if k != "messages"}
+
 MOCKED_LANGUAGES = [
     {"code": "en", "name": "english"},
     {"code": "zh", "name": "chinese"},
@@ -278,8 +281,9 @@ def mock_db_client():
     mock_db_instance.users_collection = MagicMock()
     mock_db_instance.conversations_collection = MagicMock()
 
-    mock_db_instance.get_conversations.side_effect = lambda user_id, skip=0, limit=20: \
-        [doc.copy() for doc in _conversations_store.values() if doc.get("user_id") == user_id][skip: skip + limit]
+    mock_db_instance.get_conversations.side_effect = lambda user_id, skip=0, limit=20, include_messages=False: \
+        [_project_conversation(doc, include_messages) for doc in _conversations_store.values()
+         if doc.get("user_id") == user_id][skip: skip + limit]
 
     mock_db_instance.get_conversation_by_id.side_effect = lambda conv_id_str, user_id=None: \
         _conversations_store.get(ObjectId(conv_id_str)).copy() if ObjectId(conv_id_str) in _conversations_store and \
@@ -295,6 +299,12 @@ def mock_db_client():
 
     mock_db_instance.update_conversation.side_effect = lambda conv_id_str, user_id, update_fields: \
         _update_mock_conversation(conv_id_str, user_id, update_fields, _conversations_store)
+
+    mock_db_instance.append_messages.side_effect = lambda conv_id_str, user_id, messages: \
+        _append_mock_messages(conv_id_str, user_id, messages, _conversations_store)
+
+    mock_db_instance.delete_conversation.side_effect = lambda conv_id_str, user_id: \
+        _delete_mock_conversation(conv_id_str, user_id, _conversations_store)
 
     mock_db_instance.get_user_by_username.side_effect = lambda username: \
         next((user_doc.copy() for user_doc in _users_store.values() if user_doc["user_name"] == username), None)
@@ -328,6 +338,27 @@ def mock_db_client():
         if conv_obj_id in store and store[conv_obj_id].get("user_id") == user_id:
             for key, value in update_fields.items():
                 store[conv_obj_id][key] = value
+            return True
+        return False
+
+    def _project_conversation(doc, include_messages):
+        projected = doc.copy()
+        if not include_messages:
+            projected.pop("messages", None)
+        return projected
+
+    def _append_mock_messages(conv_id_str, user_id, messages, store):
+        conv_obj_id = ObjectId(conv_id_str)
+        if conv_obj_id in store and store[conv_obj_id].get("user_id") == user_id:
+            store[conv_obj_id] = {**store[conv_obj_id],
+                                  "messages": store[conv_obj_id]["messages"] + messages}
+            return True
+        return False
+
+    def _delete_mock_conversation(conv_id_str, user_id, store):
+        conv_obj_id = ObjectId(conv_id_str)
+        if conv_obj_id in store and store[conv_obj_id].get("user_id") == user_id:
+            del store[conv_obj_id]
             return True
         return False
 
@@ -708,11 +739,27 @@ def test_get_conversations_success(client, mock_db_client):
 
     assert response.status_code == HTTPStatus.OK
     expected_conversations = [
+        conversation_to_json_compatible(_without_messages(SAMPLE_CONVERSATION_1)),
+        conversation_to_json_compatible(_without_messages(SAMPLE_CONVERSATION_2))
+    ]
+    assert json.loads(response.data) == expected_conversations
+    mock_db_client.get_conversations.assert_called_once_with(TEST_USER_ID, skip=0, limit=20,
+                                                             include_messages=False)
+
+
+def test_get_conversations_include_messages(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+
+    response = client.get(f"{API_METHOD_CONVERSATIONS}?includeMessages=true", headers=headers)
+
+    assert response.status_code == HTTPStatus.OK
+    expected_conversations = [
         conversation_to_json_compatible(SAMPLE_CONVERSATION_1),
         conversation_to_json_compatible(SAMPLE_CONVERSATION_2)
     ]
     assert json.loads(response.data) == expected_conversations
-    mock_db_client.get_conversations.assert_called_once_with(TEST_USER_ID, skip=0, limit=20)
+    mock_db_client.get_conversations.assert_called_once_with(TEST_USER_ID, skip=0, limit=20,
+                                                             include_messages=True)
 
 
 def test_get_conversations_pagination(client, mock_db_client):
@@ -722,9 +769,18 @@ def test_get_conversations_pagination(client, mock_db_client):
 
     assert response.status_code == HTTPStatus.OK
 
-    expected_conversations = [conversation_to_json_compatible(SAMPLE_CONVERSATION_2)]
+    expected_conversations = [conversation_to_json_compatible(_without_messages(SAMPLE_CONVERSATION_2))]
     assert json.loads(response.data) == expected_conversations
-    mock_db_client.get_conversations.assert_called_once_with(TEST_USER_ID, skip=1, limit=1)
+    mock_db_client.get_conversations.assert_called_once_with(TEST_USER_ID, skip=1, limit=1,
+                                                             include_messages=False)
+
+
+def test_get_conversations_page_size_too_big(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.get(f"{API_METHOD_CONVERSATIONS}?convPerPage=101", headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "'convPerPage' must not exceed 100" in json.loads(response.data)["error"]
+    mock_db_client.get_conversations.assert_not_called()
 
 
 def test_get_conversations_invalid_pagination(client, mock_db_client):
@@ -950,3 +1006,174 @@ def test_update_conversation_invalid_data(client, mock_db_client):
     }, headers=headers)
     assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "Message role must be 'user' or 'assistant'." in json.loads(response.data)["error"]
+
+def test_create_conversation_blank_title(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.post(API_METHOD_CONVERSATIONS, json={"title": "   ", "messages": []}, headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Title is required and must be a string." in json.loads(response.data)["error"]
+    mock_db_client.create_conversation.assert_not_called()
+
+
+def test_update_conversation_blank_title(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.patch(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", json={"title": ""},
+                            headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Title must not be empty." in json.loads(response.data)["error"]
+    mock_db_client.update_conversation.assert_not_called()
+
+
+# --- Tests for appending messages ---
+
+NEW_MESSAGES = [
+    {"role": "user", "content": "Otra pregunta", "timestamp": "2023-10-28T10:00:00Z"},
+    {"role": "assistant", "content": "Otra respuesta", "timestamp": "2023-10-28T10:00:05Z"},
+]
+
+
+def test_append_messages_success(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+
+    response = client.post(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}/messages",
+                           json={"messages": NEW_MESSAGES}, headers=headers)
+
+    assert response.status_code == HTTPStatus.OK
+    response_data = json.loads(response.data)
+    assert response_data["_id"] == TEST_CONVERSATION_ID_1
+    assert response_data["messages"] == SAMPLE_CONVERSATION_1["messages"] + NEW_MESSAGES
+    mock_db_client.append_messages.assert_called_once_with(TEST_CONVERSATION_ID_1, TEST_USER_ID, NEW_MESSAGES)
+
+
+def test_append_messages_not_found(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.post(f"{API_METHOD_CONVERSATION_BY_ID}{str(ObjectId())}/messages",
+                           json={"messages": NEW_MESSAGES}, headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "Conversation not found" in json.loads(response.data)["error"]
+
+
+def test_append_messages_forbidden(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.post(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_OTHER_USER}/messages",
+                           json={"messages": NEW_MESSAGES}, headers=headers)
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "User does not have access to modify this conversation." in json.loads(response.data)["error"]
+
+
+def test_append_messages_invalid_data(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    url = f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}/messages"
+
+    response = client.post(url, json={"title": "no messages"}, headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "No messages provided." in json.loads(response.data)["error"]
+
+    response = client.post(url, json={"messages": []}, headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Messages must not be empty." in json.loads(response.data)["error"]
+
+    response = client.post(url, json={"messages": [{"role": "USER", "content": "hi",
+                                                    "timestamp": "2023-10-28T10:00:00Z"}]}, headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Message role must be 'user' or 'assistant'." in json.loads(response.data)["error"]
+
+    response = client.post(f"{API_METHOD_CONVERSATION_BY_ID}invalid_id_format/messages",
+                           json={"messages": NEW_MESSAGES}, headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Invalid conversation ID format." in json.loads(response.data)["error"]
+
+    mock_db_client.append_messages.assert_not_called()
+
+
+# --- Tests for deleting conversations ---
+
+def test_delete_conversation_success(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+
+    response = client.delete(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", headers=headers)
+
+    assert response.status_code == HTTPStatus.NO_CONTENT
+    assert response.data == b""
+    mock_db_client.delete_conversation.assert_called_once_with(TEST_CONVERSATION_ID_1, TEST_USER_ID)
+    assert ObjectId(TEST_CONVERSATION_ID_1) not in mock_db_client._conversations_store_accessor
+
+
+def test_delete_conversation_not_found(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.delete(f"{API_METHOD_CONVERSATION_BY_ID}{str(ObjectId())}", headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "Conversation not found" in json.loads(response.data)["error"]
+
+
+def test_delete_conversation_forbidden(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.delete(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_OTHER_USER}", headers=headers)
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "User does not have access to delete this conversation." in json.loads(response.data)["error"]
+    assert ObjectId(TEST_CONVERSATION_ID_OTHER_USER) in mock_db_client._conversations_store_accessor
+
+
+def test_delete_conversation_invalid_id_format(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.delete(f"{API_METHOD_CONVERSATION_BY_ID}invalid_id_format", headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "Invalid conversation ID format." in json.loads(response.data)["error"]
+    mock_db_client.delete_conversation.assert_not_called()
+
+
+# --- Tests for HTTP errors raised by Flask/Werkzeug ---
+
+def test_malformed_json_returns_400(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
+               'Content-Type': 'application/json'}
+    response = client.post(API_METHOD_CONVERSATIONS, data="{not json", headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert response.content_type == "application/json"
+    assert "error" in json.loads(response.data)
+
+
+def test_wrong_content_type_returns_415(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}",
+               'Content-Type': 'text/plain'}
+    response = client.post(API_METHOD_CONVERSATIONS, data="hello", headers=headers)
+    assert response.status_code == HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+    assert "error" in json.loads(response.data)
+
+
+def test_unknown_route_returns_404(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.get("/senecaai/v1/does-not-exist", headers=headers)
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "error" in json.loads(response.data)
+
+
+def test_method_not_allowed_returns_405(client, mock_db_client):
+    headers = {"Authorization": f"Bearer {generate_jwt(TEST_USER_ID, TEST_USER_NAME)}"}
+    response = client.put(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", json={}, headers=headers)
+    assert response.status_code == HTTPStatus.METHOD_NOT_ALLOWED
+    assert "Allow" in response.headers
+    assert "error" in json.loads(response.data)
+
+
+# --- Tests for API key users ---
+
+def test_api_key_without_user_header_uses_default_user(client, mock_db_client):
+    response = client.get(API_METHOD_CONVERSATIONS, headers={'X-SENECA-AI-API-KEY': TEST_API_KEY})
+    assert response.status_code == HTTPStatus.OK
+    mock_db_client.get_conversations.assert_called_once_with("api_key_user", skip=0, limit=20,
+                                                             include_messages=False)
+
+
+def test_api_key_with_user_header_acts_on_behalf_of_user(client, mock_db_client):
+    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'X-SENECA-AI-USER-ID': TEST_USER_ID}
+    response = client.get(f"{API_METHOD_CONVERSATION_BY_ID}{TEST_CONVERSATION_ID_1}", headers=headers)
+    assert response.status_code == HTTPStatus.OK
+    mock_db_client.get_conversation_by_id.assert_called_once_with(TEST_CONVERSATION_ID_1, user_id=TEST_USER_ID)
+
+
+def test_api_key_with_too_long_user_header(client, mock_db_client):
+    headers = {'X-SENECA-AI-API-KEY': TEST_API_KEY, 'X-SENECA-AI-USER-ID': "x" * 129}
+    response = client.get(API_METHOD_CONVERSATIONS, headers=headers)
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert "X-SENECA-AI-USER-ID must not exceed 128 characters." in json.loads(response.data)["error"]

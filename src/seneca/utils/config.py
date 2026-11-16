@@ -24,6 +24,7 @@ load_dotenv(dotenv_path=_ENV_PATH)
 _ALLOWED_FASTER_WHISPER_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v3"}
 _ALLOWED_FASTER_WHISPER_COMPUTE_TYPES = {"int8", "float16"}
 _ALLOWED_STT_BACKENDS = {"faster-whisper", "google"}
+_ALLOWED_CONVERSATION_STORAGES = {"api", "local"}
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,10 @@ class AppConfig:
         default_factory=lambda: int(
             os.getenv("MAX_CONVERSATIONS", "20")
         )
+    )
+    # Where conversations are saved: "api" (Seneca AI REST API) | "local" (~/.seneca)
+    conversation_storage: str = field(
+        default_factory=lambda: os.getenv("CONVERSATION_STORAGE", "api")
     )
     
     # STT configuration
@@ -108,6 +113,10 @@ class AppConfig:
     seneca_ai_api_key_file: str = field(
         default_factory=lambda: os.getenv("SENECA_AI_API_KEY_FILE", "")
     )
+    # User on whose behalf the desktop app stores conversations through the API
+    seneca_user_id: str = field(
+        default_factory=lambda: os.getenv("SENECA_USER_ID", "")
+    )
 
     # MongoDB URI
     mongodb_uri: str = field(
@@ -127,6 +136,10 @@ class AppConfig:
         if self.stt_backend not in _ALLOWED_STT_BACKENDS:            
             logger.warning(f"Invalid STT_BACKEND '{self.stt_backend}'. Defaulting to 'faster-whisper'.")
             object.__setattr__(self, 'stt_backend', 'faster-whisper')
+
+        if self.conversation_storage not in _ALLOWED_CONVERSATION_STORAGES:
+            logger.warning(f"Invalid CONVERSATION_STORAGE '{self.conversation_storage}'. Defaulting to 'api'.")
+            object.__setattr__(self, 'conversation_storage', 'api')
 
         # Basic validation for whisper_model_size
         if self.whisper_model_size not in _ALLOWED_FASTER_WHISPER_MODEL_SIZES:

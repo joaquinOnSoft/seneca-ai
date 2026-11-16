@@ -16,12 +16,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from seneca.api.client import (
+    ConversationData,
+    ConversationMessage,
     HealthResponse,
     LanguageInfo,
     SenecaApiClient,
     SenecaApiError,
     SenecaAuthenticationError,
     SenecaBadRequestError,
+    SenecaForbiddenError,
+    SenecaNotFoundError,
     SenecaServerError,
     SenecaServiceUnavailableError,
     TranscriptionResult,
@@ -188,8 +192,18 @@ class TestRaiseForStatus:
         with pytest.raises(SenecaServerError):
             SenecaApiClient._raise_for_status(resp)
 
-    def test_404_raises_generic_api_error(self):
+    def test_404_raises_not_found_error(self):
         resp = self._make_response(404, {"error": "not found"})
+        with pytest.raises(SenecaNotFoundError):
+            SenecaApiClient._raise_for_status(resp)
+
+    def test_403_raises_forbidden_error(self):
+        resp = self._make_response(403, {"error": "forbidden"})
+        with pytest.raises(SenecaForbiddenError):
+            SenecaApiClient._raise_for_status(resp)
+
+    def test_unmapped_4xx_raises_generic_api_error(self):
+        resp = self._make_response(409, {"error": "conflict"})
         with pytest.raises(SenecaApiError) as exc_info:
             SenecaApiClient._raise_for_status(resp)
         assert type(exc_info.value) is SenecaApiError  # not a subclass
@@ -637,3 +651,121 @@ class TestDataModels:
         tr = TranscriptionResult(text="hello")
         with pytest.raises(AttributeError):
             tr.text = "bye"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Conversations
+# ---------------------------------------------------------------------------
+
+CONV_JSON = {
+    "_id": "6553f1a2b3c4d5e6f7a8b9c0",
+    "user_id": "u1",
+    "title": "Saludo",
+    "created_at": "2026-01-01T10:00:00Z",
+    "updated_at": "2026-01-01T10:00:02Z",
+    "messages": [
+        {"role": "user", "content": "Hola", "timestamp": "2026-01-01T10:00:00Z"},
+        {"role": "assistant", "content": "¡Hola!", "timestamp": "2026-01-01T10:00:02Z"},
+    ],
+}
+CONV_URL = "http://localhost:1414/senecaai/v1/conversations"
+MSG = ConversationMessage("user", "Hola", "2026-01-01T10:00:00Z")
+
+
+def _ok(json_body=None, status_code=200):
+    resp = MagicMock()
+    resp.ok = True
+    resp.status_code = status_code
+    resp.json.return_value = json_body
+    return resp
+
+
+def _error(status_code, message):
+    resp = MagicMock()
+    resp.ok = False
+    resp.status_code = status_code
+    resp.json.return_value = {"error": message}
+    return resp
+
+
+class TestConversations:
+    def test_user_id_header(self, mock_session):
+        c = SenecaApiClient(base_url="http://h", api_key="k", user_id="joaquin")
+        assert c._headers()["X-SENECA-AI-USER-ID"] == "joaquin"
+
+    def test_no_user_id_header_by_default(self, client):
+        assert "X-SENECA-AI-USER-ID" not in client._headers()
+
+    def test_list_conversations(self, client, mock_session):
+        summary = {k: v for k, v in CONV_JSON.items() if k != "messages"}
+        mock_session.get.return_value = _ok([summary])
+
+        result = client.list_conversations(per_page=5, page=2)
+
+        assert result == [ConversationData.from_json(summary)]
+        assert result[0].messages == []
+        args, kwargs = mock_session.get.call_args
+        assert args[0] == CONV_URL
+        assert kwargs["params"] == {"convPerPage": 5, "numPage": 2, "includeMessages": "false"}
+        assert kwargs["headers"]["X-SENECA-AI-API-KEY"] == "test-key"
+
+    def test_list_conversations_with_messages(self, client, mock_session):
+        mock_session.get.return_value = _ok([CONV_JSON])
+        result = client.list_conversations(include_messages=True)
+        assert result[0].messages[1] == ConversationMessage("assistant", "¡Hola!", "2026-01-01T10:00:02Z")
+        assert mock_session.get.call_args.kwargs["params"]["includeMessages"] == "true"
+
+    def test_get_conversation(self, client, mock_session):
+        mock_session.get.return_value = _ok(CONV_JSON)
+        result = client.get_conversation(CONV_JSON["_id"])
+        assert result.id == CONV_JSON["_id"]
+        assert result.updated_at == "2026-01-01T10:00:02Z"
+        assert len(result.messages) == 2
+        assert mock_session.get.call_args.args[0] == f"{CONV_URL}/{CONV_JSON['_id']}"
+
+    def test_get_conversation_not_found(self, client, mock_session):
+        mock_session.get.return_value = _error(404, "Conversation not found.")
+        with pytest.raises(SenecaNotFoundError, match="Conversation not found."):
+            client.get_conversation("x")
+
+    def test_get_conversation_forbidden(self, client, mock_session):
+        mock_session.get.return_value = _error(403, "No access")
+        with pytest.raises(SenecaForbiddenError):
+            client.get_conversation("x")
+
+    def test_create_conversation(self, client, mock_session):
+        mock_session.post.return_value = _ok(CONV_JSON, 201)
+        result = client.create_conversation("Saludo", [MSG])
+        assert result.id == CONV_JSON["_id"]
+        args, kwargs = mock_session.post.call_args
+        assert args[0] == CONV_URL
+        assert kwargs["json"] == {"title": "Saludo", "messages": [MSG.to_json()]}
+
+    def test_update_conversation(self, client, mock_session):
+        mock_session.patch.return_value = _ok(CONV_JSON)
+        client.update_conversation("abc", title="Nuevo")
+        args, kwargs = mock_session.patch.call_args
+        assert args[0] == f"{CONV_URL}/abc"
+        assert kwargs["json"] == {"title": "Nuevo"}
+
+    def test_update_conversation_requires_fields(self, client, mock_session):
+        with pytest.raises(ValueError):
+            client.update_conversation("abc")
+        mock_session.patch.assert_not_called()
+
+    def test_append_messages(self, client, mock_session):
+        mock_session.post.return_value = _ok(CONV_JSON)
+        client.append_messages("abc", [MSG])
+        args, kwargs = mock_session.post.call_args
+        assert args[0] == f"{CONV_URL}/abc/messages"
+        assert kwargs["json"] == {"messages": [MSG.to_json()]}
+
+    def test_delete_conversation(self, client, mock_session):
+        mock_session.delete.return_value = _ok(status_code=204)
+        assert client.delete_conversation("abc") is None
+        assert mock_session.delete.call_args.args[0] == f"{CONV_URL}/abc"
+
+    def test_delete_conversation_bad_request(self, client, mock_session):
+        mock_session.delete.return_value = _error(400, "Invalid conversation ID format.")
+        with pytest.raises(SenecaBadRequestError):
+            client.delete_conversation("bad")
