@@ -136,7 +136,9 @@ logging.getLogger().addFilter(RequestIdFilter())
 logging.getLogger().setLevel(logging.INFO)
 
 # --- MongoDB Configuration ---
-db_client = MongoDatabase(config.mongodb_uri)
+db_client = MongoDatabase(config.mongodb_uri,
+                          username=config.mongodb_username or None,
+                          password=config.mongodb_password or None)
 
 # Defer MongoDB connection to a function to be called within app context or mocked
 def init_mongodb():

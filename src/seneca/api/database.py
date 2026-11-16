@@ -12,8 +12,12 @@ from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401
 
 
 class MongoDatabase:
-    def __init__(self, mongo_uri):
+    def __init__(self, mongo_uri, username=None, password=None, auth_source="admin"):
         self.mongo_uri = mongo_uri
+        # Credentials are passed apart from the URI so they never end up in logs
+        self._username = username
+        self._password = password
+        self._auth_source = auth_source
         self._client = None
         self._db = None
         self.conversations_collection = None
@@ -35,7 +39,11 @@ class MongoDatabase:
             return
 
         try:
-            self._client = MongoClient(self.mongo_uri)
+            credentials = {}
+            if self._username:
+                credentials = {"username": self._username, "password": self._password,
+                               "authSource": self._auth_source}
+            self._client = MongoClient(self.mongo_uri, **credentials)
             self._db = self._client.get_database()
             self.conversations_collection = self._db.conversations
             self.users_collection = self._db.users

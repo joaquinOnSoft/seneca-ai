@@ -306,3 +306,12 @@ def test_delete_conversation_success(mock_db_instance, sample_conversation_data)
 def test_delete_conversation_not_found(mock_db_instance):
     mock_db_instance.conversations_collection.delete_one.return_value.deleted_count = 0
     assert mock_db_instance.delete_conversation(str(ObjectId()), "test_user_1") is False
+
+
+def test_connect_with_credentials(mock_mongo_client):
+    MockMongoClient, mock_client_instance, _ = mock_mongo_client
+    MockMongoClient.return_value = mock_client_instance
+    db = MongoDatabase("mongodb://mongo:27017/senecaai", username="root", password="s3cr3t")
+    db.connect()
+    MockMongoClient.assert_called_once_with("mongodb://mongo:27017/senecaai", username="root",
+                                            password="s3cr3t", authSource="admin")

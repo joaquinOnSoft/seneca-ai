@@ -44,6 +44,26 @@ function Write-EnvVar {
 }
 
 # ============================================================
+# FUNCTION: Generate the JWT signing secret used by the api container
+# (only once: the existing secret is kept so issued tokens stay valid)
+# ============================================================
+function New-JwtSecret {
+    $SecretFile = Join-Path $ScriptDir "docker\api\jwt_secret_key.txt"
+    if ((Test-Path $SecretFile) -and ((Get-Item $SecretFile).Length -gt 0)) {
+        Write-Host "JWT secret already exists: $SecretFile" -ForegroundColor Yellow
+        return
+    }
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($bytes)
+    $rng.Dispose()
+    $secret = ($bytes | ForEach-Object { $_.ToString("x2") }) -join ''
+    # No BOM and no trailing newline
+    [System.IO.File]::WriteAllText($SecretFile, $secret)
+    Write-Host "Generated JWT secret: $SecretFile" -ForegroundColor Green
+}
+
+# ============================================================
 # FUNCTION: Remove existing Docker volume
 # so Docker re-creates it with the current device path from .env
 # ============================================================
@@ -196,6 +216,8 @@ if (Test-Path $MarkerFile) {
     Write-EnvVar -EnvVarName "MONGO_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
     Write-Host "MONGO_DATA_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
 
+    # The api container needs the JWT secret file (Docker secret)
+    New-JwtSecret
 
     # Start Docker Engine service and wait until the daemon is ready
     Start-DockerEngine
@@ -302,6 +324,9 @@ Write-EnvVar -EnvVarName "OLLAMA_MODELS_PATH" -Path $OllamaPath -EnvFilePath $En
 
 # New: Write MONGO_DATA_PATH to .env
 Write-EnvVar -EnvVarName "MONGO_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
+
+# The api container needs the JWT secret file (Docker secret)
+New-JwtSecret
 
 # 3. Check if Docker is already installed
 if (Get-Command docker -ErrorAction SilentlyContinue) {

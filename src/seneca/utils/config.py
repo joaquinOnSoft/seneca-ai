@@ -122,10 +122,28 @@ class AppConfig:
     mongodb_uri: str = field(
         default_factory=lambda: os.getenv("MONGODB_URI", "mongodb://localhost:27017/seneca_db")
     )
+    # Optional MongoDB credentials (Docker secrets), kept out of the URI.
+    # The user is authenticated against the "admin" database, where the
+    # official mongo image creates the root user.
+    mongodb_username: str = field(
+        default_factory=lambda: os.getenv("MONGODB_USERNAME", "")
+    )
+    mongodb_password: str = field(
+        default_factory=lambda: os.getenv("MONGODB_PASSWORD", "")
+    )
+    mongodb_username_file: str = field(
+        default_factory=lambda: os.getenv("MONGO_ROOT_USERNAME_FILE", "")
+    )
+    mongodb_password_file: str = field(
+        default_factory=lambda: os.getenv("MONGO_ROOT_PASSWORD_FILE", "")
+    )
 
     # JWT Configuration
     jwt_secret_key: str = field(
         default_factory=lambda: os.getenv("JWT_SECRET_KEY", "")
+    )
+    jwt_secret_key_file: str = field(
+        default_factory=lambda: os.getenv("JWT_SECRET_KEY_FILE", "")
     )
     jwt_access_token_expires_in: int = field(
         default_factory=lambda: int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_IN", "3600")) # 1 hour
@@ -151,18 +169,26 @@ class AppConfig:
             logger.warning(f"Invalid WHISPER_COMPUTE_TYPE '{self.whisper_compute_type}'. Defaulting to 'int8'.")
             object.__setattr__(self, 'whisper_compute_type', 'int8')
 
-        # Read SENECA_AI_API_KEY from file if SENECA_AI_API_KEY_FILE is provided
-        if self.seneca_ai_api_key_file and os.path.exists(self.seneca_ai_api_key_file):
-            try:
-                with open(self.seneca_ai_api_key_file, 'r') as f:
-                    secret_value = f.read().strip()
-                    object.__setattr__(self, 'seneca_ai_api_key', secret_value) # Corrected line
-                logger.info(f"SENECA_AI_API_KEY loaded from file: {self.seneca_ai_api_key_file}")
-            except Exception as e:
-                logger.warning(f"Could not read SENECA_AI_API_KEY from file {self.seneca_ai_api_key_file}. Error: {e}")
+        # Secrets provided as files (Docker secrets) take precedence over plain variables
+        self._load_secret_from_file('seneca_ai_api_key', self.seneca_ai_api_key_file)
+        self._load_secret_from_file('jwt_secret_key', self.jwt_secret_key_file)
+        self._load_secret_from_file('mongodb_username', self.mongodb_username_file)
+        self._load_secret_from_file('mongodb_password', self.mongodb_password_file)
 
         if not self.jwt_secret_key:
-            raise ValueError("JWT_SECRET_KEY must be set in the environment variables or .env file.")
+            raise ValueError("JWT_SECRET_KEY (or JWT_SECRET_KEY_FILE) must be set in the environment "
+                             "variables or .env file.")
+
+    def _load_secret_from_file(self, attr_name: str, file_path: str) -> None:
+        """Overwrite *attr_name* with the content of *file_path*, if the file exists."""
+        if not file_path or not os.path.exists(file_path):
+            return
+        try:
+            with open(file_path, 'r') as f:
+                object.__setattr__(self, attr_name, f.read().strip())
+            logger.info(f"{attr_name.upper()} loaded from file: {file_path}")
+        except Exception as e:
+            logger.warning(f"Could not read {attr_name.upper()} from file {file_path}. Error: {e}")
 
 
 # Singleton – import and use directly
