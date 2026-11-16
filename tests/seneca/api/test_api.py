@@ -362,10 +362,11 @@ def mock_db_client():
             return True
         return False
 
-    def _find_user_by_refresh_token_mock(refresh_token_to_find, store):
+    # Same semantics as the MongoDB queries: exact match on the stored hash
+    def _find_user_by_refresh_token_mock(refresh_token_hash, store):
         for user_doc in store.values():
             for rt_entry in user_doc.get("refresh_tokens", []):
-                if bcrypt.verify(refresh_token_to_find, rt_entry["token_hash"]) and \
+                if rt_entry["token_hash"] == refresh_token_hash and \
                         rt_entry["expires_at"] > dt.datetime.now(dt.timezone.utc) and \
                         not rt_entry["revoked"]:
                     return user_doc
@@ -384,12 +385,12 @@ def mock_db_client():
             return True
         return False
 
-    def _revoke_refresh_token_mock(user_id, refresh_token_to_revoke, store):
+    def _revoke_refresh_token_mock(user_id, refresh_token_hash, store):
         user_obj_id = ObjectId(user_id)
         if user_obj_id in store:
             user_doc = store[user_obj_id]
             for rt_entry in user_doc.get("refresh_tokens", []):
-                if bcrypt.verify(refresh_token_to_revoke, rt_entry["token_hash"]):
+                if rt_entry["token_hash"] == refresh_token_hash:
                     rt_entry["revoked"] = True
                     return True
         return False
@@ -650,7 +651,9 @@ def test_auth_login_success(client, mock_db_client):
     user_in_db = mock_db_client.get_user_by_id(user_id)
     assert user_in_db is not None
     assert len(user_in_db["refresh_tokens"]) == 1
-    assert bcrypt.verify(data["refresh_token"], user_in_db["refresh_tokens"][0]["token_hash"])
+    # Only the hash is stored, never the token itself
+    assert user_in_db["refresh_tokens"][0]["token_hash"] == hash_refresh_token(data["refresh_token"])
+    assert user_in_db["refresh_tokens"][0]["token_hash"] != data["refresh_token"]
     assert not user_in_db["refresh_tokens"][0]["revoked"]
     assert user_in_db["refresh_tokens"][0]["expires_at"] > dt.datetime.now(dt.timezone.utc)
 
@@ -1177,3 +1180,41 @@ def test_api_key_with_too_long_user_header(client, mock_db_client):
     response = client.get(API_METHOD_CONVERSATIONS, headers=headers)
     assert response.status_code == HTTPStatus.BAD_REQUEST
     assert "X-SENECA-AI-USER-ID must not exceed 128 characters." in json.loads(response.data)["error"]
+
+
+# --- Tests for refresh token hashing ---
+
+def test_hash_refresh_token_is_deterministic():
+    token = generate_refresh_token()
+    # Must be deterministic so MongoDB can find the token by equality (bcrypt is salted and is not)
+    assert hash_refresh_token(token) == hash_refresh_token(token)
+    assert hash_refresh_token(token) != token
+    assert hash_refresh_token(token) != hash_refresh_token(generate_refresh_token())
+
+
+def test_verify_refresh_token():
+    token = generate_refresh_token()
+    assert verify_refresh_token(token, hash_refresh_token(token))
+    assert not verify_refresh_token("other-token", hash_refresh_token(token))
+
+
+def test_auth_refresh_looks_up_the_token_hash(client, auth_tokens, mock_db_client):
+    refresh_token = auth_tokens["refresh_token"]
+    response = client.post(API_METHOD_AUTH_REFRESH, headers={"Authorization": f"Bearer {refresh_token}"})
+    assert response.status_code == HTTPStatus.OK
+    mock_db_client.find_user_by_refresh_token.assert_called_with(hash_refresh_token(refresh_token))
+
+
+def test_auth_logout_revokes_the_token_hash(client, auth_tokens, mock_db_client):
+    refresh_token = auth_tokens["refresh_token"]
+    response = client.post(API_METHOD_AUTH_LOGOUT, headers={"Authorization": f"Bearer {refresh_token}"})
+    assert response.status_code == HTTPStatus.OK
+    mock_db_client.revoke_refresh_token.assert_called_once_with(TEST_USER_ID, hash_refresh_token(refresh_token))
+
+
+def test_auth_refresh_after_logout_is_rejected(client, auth_tokens, mock_db_client):
+    headers = {"Authorization": f"Bearer {auth_tokens['refresh_token']}"}
+    assert client.post(API_METHOD_AUTH_LOGOUT, headers=headers).status_code == HTTPStatus.OK
+    response = client.post(API_METHOD_AUTH_REFRESH, headers=headers)
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+

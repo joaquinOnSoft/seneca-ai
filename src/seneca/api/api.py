@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -250,10 +252,12 @@ def generate_refresh_token():
     return str(uuid.uuid4())
 
 def hash_refresh_token(token):
-    return bcrypt.hash(token)
+    # Deterministic hash (unlike bcrypt, which is salted) so MongoDB can find the token by equality.
+    # Safe without salt because refresh tokens are random values, not user-chosen passwords.
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 def verify_refresh_token(token, hashed_token):
-    return bcrypt.verify(token, hashed_token)
+    return hmac.compare_digest(hash_refresh_token(token), hashed_token)
 
 
 # --- Swagger Configuration ---
@@ -790,7 +794,7 @@ def refresh_token():
 
     refresh_token = auth_header.split(' ')[1]
     
-    user = db_client.find_user_by_refresh_token(refresh_token)
+    user = db_client.find_user_by_refresh_token(hash_refresh_token(refresh_token))
 
     if user:
         new_access_token = generate_jwt(str(user['_id']), user['user_name'])
@@ -837,14 +841,14 @@ def logout():
         api.logger.warning("Logout attempt with missing Authorization header or malformed.")
         raise BadRequestError("Refresh token not provided.")
 
-    refresh_token = auth_header.split(' ')[1]
+    refresh_token_hash = hash_refresh_token(auth_header.split(' ')[1])
     
-    user = db_client.find_user_by_refresh_token(refresh_token)
+    user = db_client.find_user_by_refresh_token(refresh_token_hash)
     if not user:
         api.logger.warning("Logout failed: Invalid refresh token provided.")
         raise UnauthorizedError("Invalid refresh token.")
 
-    if db_client.revoke_refresh_token(str(user['_id']), refresh_token):
+    if db_client.revoke_refresh_token(str(user['_id']), refresh_token_hash):
         api.logger.info("Logout successful: Refresh token revoked.")
         return jsonify({"message": "Logout successful."}), HTTPStatus.OK
     else:
