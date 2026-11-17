@@ -5,9 +5,9 @@ from bson.objectid import ObjectId
 from pymongo.errors import ConnectionFailure, PyMongoError
 
 from seneca.api.database import MongoDatabase
-from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401 — "Applies the patch via side effect
-# noinspection PyUnresolvedReferences
 from passlib.hash import bcrypt
+
+from seneca.api.api import hash_refresh_token
 
 # Mock config for MongoDatabase
 class MockConfig:
@@ -199,7 +199,7 @@ def test_get_user_by_id(mock_db_instance, sample_user_data):
 
 
 def test_find_user_by_refresh_token(mock_db_instance, sample_user_data):
-    token_hash = bcrypt.hash("refresh_token_abc")
+    token_hash = hash_refresh_token("refresh_token_abc")
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     sample_user_data["refresh_tokens"].append(
         {"token_hash": token_hash, "issued_at": datetime.now(timezone.utc), "expires_at": expires_at, "revoked": False})
@@ -212,7 +212,7 @@ def test_find_user_by_refresh_token(mock_db_instance, sample_user_data):
 
 def test_add_refresh_token_to_user(mock_db_instance, sample_user_data):
     user_id = str(sample_user_data["_id"])
-    token_hash = bcrypt.hash("new_refresh_token")
+    token_hash = hash_refresh_token("new_refresh_token")
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
 
     mock_db_instance.add_refresh_token_to_user(user_id, token_hash, expires_at)
@@ -224,7 +224,7 @@ def test_add_refresh_token_to_user(mock_db_instance, sample_user_data):
 
 
 def test_revoke_refresh_token_success(mock_db_instance, sample_user_data):
-    token_hash = bcrypt.hash("token_to_revoke")
+    token_hash = hash_refresh_token("token_to_revoke")
     mock_db_instance.users_collection.update_one.return_value.matched_count = 1
     revoked = mock_db_instance.revoke_refresh_token(str(sample_user_data["_id"]), token_hash)
     assert revoked is True
@@ -235,7 +235,7 @@ def test_revoke_refresh_token_success(mock_db_instance, sample_user_data):
 
 
 def test_revoke_refresh_token_not_found(mock_db_instance, sample_user_data):
-    token_hash = bcrypt.hash("non_existent_token")
+    token_hash = hash_refresh_token("non_existent_token")
     mock_db_instance.users_collection.update_one.return_value.matched_count = 0
     revoked = mock_db_instance.revoke_refresh_token(str(sample_user_data["_id"]), token_hash)
     assert revoked is False

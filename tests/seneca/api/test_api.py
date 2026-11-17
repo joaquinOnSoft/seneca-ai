@@ -8,7 +8,6 @@ from http import HTTPStatus # Import HTTPStatus for standard status codes
 import pytest
 from bson.objectid import ObjectId
 from pymongo.errors import PyMongoError
-from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401
 from passlib.hash import bcrypt
 
 from seneca.api.api import api as flask_app
@@ -1216,5 +1215,25 @@ def test_auth_refresh_after_logout_is_rejected(client, auth_tokens, mock_db_clie
     headers = {"Authorization": f"Bearer {auth_tokens['refresh_token']}"}
     assert client.post(API_METHOD_AUTH_LOGOUT, headers=headers).status_code == HTTPStatus.OK
     response = client.post(API_METHOD_AUTH_REFRESH, headers=headers)
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+# --- Tests for long passwords (bcrypt>=5 rejects more than 72 bytes) ---
+
+def _add_user_with_password(mock_db_client, password):
+    user_id = ObjectId(TEST_USER_ID)
+    mock_db_client._users_store_accessor[user_id]["password_hash"] = bcrypt.hash(password.encode("utf-8")[:72])
+
+
+def test_auth_login_long_password(client, mock_db_client):
+    long_password = "contraseña-muy-larga-" * 6  # > 72 bytes
+    _add_user_with_password(mock_db_client, long_password)
+    response = client.post(API_METHOD_AUTH_LOGIN, json={"username": TEST_USER_NAME, "password": long_password})
+    assert response.status_code == HTTPStatus.OK
+
+
+def test_auth_login_long_wrong_password_is_unauthorized(client, mock_db_client):
+    _add_user_with_password(mock_db_client, "a" * 100)
+    response = client.post(API_METHOD_AUTH_LOGIN, json={"username": TEST_USER_NAME, "password": "b" * 100})
     assert response.status_code == HTTPStatus.UNAUTHORIZED
 

@@ -24,10 +24,11 @@ from werkzeug.exceptions import HTTPException
 
 from seneca.api.database import MongoDatabase
 from seneca.utils.config import config
-from seneca.utils.passlib_bcrypt_fix import _passlib_bcrypt_module  # noqa: F401
 
 H265 = "HS256"
 MAX_CONV_PER_PAGE = 100
+# bcrypt only uses the first 72 bytes of a password; bcrypt>=5 raises an error instead of truncating
+BCRYPT_MAX_PASSWORD_BYTES = 72
 MAX_USER_ID_LENGTH = 128
 API_KEY_DEFAULT_USER = "api_key_user"
 
@@ -247,6 +248,10 @@ def decode_jwt(token):
         raise UnauthorizedError("Token has expired")
     except jwt.InvalidTokenError:
         raise UnauthorizedError("Invalid token")
+
+def verify_password(password, password_hash):
+    # Truncate like bcrypt<5 did implicitly, so existing hashes keep working and long passwords don't fail
+    return bcrypt.verify(password.encode("utf-8")[:BCRYPT_MAX_PASSWORD_BYTES], password_hash)
 
 def generate_refresh_token():
     return str(uuid.uuid4())
@@ -736,7 +741,7 @@ def login():
 
     user = db_client.get_user_by_username(username)
 
-    if user and bcrypt.verify(password, user['password_hash']):
+    if user and verify_password(password, user['password_hash']):
         access_token = generate_jwt(str(user['_id']), user['user_name'])
         refresh_token = generate_refresh_token()
         hashed_refresh_token = hash_refresh_token(refresh_token)
