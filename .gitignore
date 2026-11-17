@@ -5,6 +5,8 @@ volumes/
  
 # Local overrides (paths, ports, individual developer credentials)
 docker-compose.override.yaml
+# JWT signing secret, generated locally by the install/redeploy scripts
+docker/api/jwt_secret_key.txt
  
 # Local overrides (paths, ports, individual developer credentials)
 .dockerignore~
