@@ -169,8 +169,6 @@ services:
       - jwt_secret_key
       - mongo_root_username
       - mongo_root_password
-    storage_opt:
-      size: 5G
 
 # ── Volumes ────────────────────────────────────────────────────
 volumes:
@@ -192,7 +190,7 @@ volumes:
       o: bind
       # Host path where MongoDB data files are persisted.
       # Create it before the first `docker compose up`:
-      #   sudo mkdir -p /opt/senecaai/volumes/mongodb
+      #   sudo mkdir -p /opt/senecaai/volumes/mongo
       #   sudo chown -R $USER:$USER /opt/senecaai
       device: "${MONGODB_DATA_PATH:-/opt/senecaai/volumes/mongo}"
 
@@ -202,11 +200,12 @@ networks:
     driver: bridge
 
 # ── Secrets ────────────────────────────────────────────────────
+# None of these files is versioned: generate_secrets.sh / generate_secrets.ps1
+# (called by install-ubuntu.sh, install-win.ps1, redeploy.sh and redeploy.bat)
+# create the missing ones and never overwrite the existing ones.
 secrets:
   seneca_ai_api_key_secret:
     file: docker/api/seneca_ai_api_key.txt
-  # Not versioned: created by install-ubuntu.sh, install-win.ps1, redeploy.sh and redeploy.bat
-  #   python -c "import secrets; print(secrets.token_hex(32))" > docker/api/jwt_secret_key.txt
   jwt_secret_key:
     file: docker/api/jwt_secret_key.txt
   mongo_root_username:

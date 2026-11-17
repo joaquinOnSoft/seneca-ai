@@ -10,7 +10,7 @@ source ./select_ollama_model.sh
 REAL_USER=${SUDO_USER:-$USER}
 
 # 1. Directory Preparation (This runs regardless of Docker installation)
-echo "Preparing directories for Ollama..."#!/bin/bash
+echo "Preparing directories for Ollama and MongoDB..."
 
 sudo mkdir -p /opt/senecaai/volumes/ollama
 sudo mkdir -p /opt/senecaai/volumes/mongo
@@ -56,23 +56,32 @@ else
 
     echo "Step 5: Configuring permissions for user $REAL_USER..."
     sudo usermod -aG docker "$REAL_USER"
-
-    newgrp docker
+    # Note: "newgrp docker" is not used here because it opens a new shell and
+    # blocks the script. The group applies after logging out and back in.
+    echo "Log out and back in to use docker without sudo."
 
     echo "--------------------------------------------------------"
     echo "Docker installation completed successfully!"
     echo "--------------------------------------------------------"
 fi
 
-# Generate the JWT signing secret used by the api container (only once)
-JWT_SECRET_FILE="docker/api/jwt_secret_key.txt"
-if [ ! -s "$JWT_SECRET_FILE" ]; then
-    echo "Generating JWT secret in $JWT_SECRET_FILE..."
-    (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$JWT_SECRET_FILE")
+# Generate the Docker secrets that do not exist yet (API key, JWT secret,
+# MongoDB user and password) and sync the API key into .env
+source ./generate_secrets.sh
+
+# 3. Build the images and start the containers in the background (detached),
+#    so the script finishes instead of staying attached to the containers' logs.
+#    Right after a fresh Docker install the current shell is not yet in the
+#    "docker" group, so fall back to sudo in that case.
+if docker info &> /dev/null; then
+    DOCKER="docker"
+else
+    DOCKER="sudo docker"
 fi
+$DOCKER compose up -d --build
 
-# 3. Builds, (re)creates, starts, and attaches to containers for the service.
-docker compose up --build
-
-# 4. Run containers in background
-docker compose up -d
+echo "--------------------------------------------------------"
+echo "Seneca AI containers started in the background."
+echo "  Status: docker compose ps"
+echo "  Logs:   docker compose logs -f"
+echo "--------------------------------------------------------"

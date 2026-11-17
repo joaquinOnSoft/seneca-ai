@@ -11,7 +11,6 @@
 #    · api.devices     — removed (ALSA /dev/snd does not exist on Windows)
 #    · api.group_add   — removed (Linux group model, not applicable on Windows)
 #    · api.cap_add     — removed (Linux capabilities, ignored/unsupported on Windows)
-#    · api.storage_opt — removed (overlay2 storage option, Linux-only)
 #    · volumes.ollama_models.driver_opts.device  — Windows default path
 #    · volumes.mongodb_data.driver_opts.device   — Windows default path
 #
@@ -40,7 +39,6 @@ services:
 
     cap_add: !reset [] # SYS_NICE (JACK RT priority) — not applicable on Windows
 
-    storage_opt: {}    # overlay2 size option — Linux-only, removed on Windows
 
 # ── Volumes ────────────────────────────────────────────────────
 #  Windows host paths, both single-quoted on purpose: YAML double-quoted

@@ -2,12 +2,9 @@
 
 clear
 
-# Generate the JWT signing secret used by the api container (only once)
-JWT_SECRET_FILE="docker/api/jwt_secret_key.txt"
-if [ ! -s "$JWT_SECRET_FILE" ]; then
-    echo "Generating JWT secret in $JWT_SECRET_FILE..."
-    (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$JWT_SECRET_FILE")
-fi
+# Generate the Docker secrets that do not exist yet (API key, JWT secret,
+# MongoDB user and password) and sync the API key into .env
+source ./generate_secrets.sh
 
 docker compose down -v
 docker compose build --no-cache

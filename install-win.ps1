@@ -44,23 +44,12 @@ function Write-EnvVar {
 }
 
 # ============================================================
-# FUNCTION: Generate the JWT signing secret used by the api container
-# (only once: the existing secret is kept so issued tokens stay valid)
+# FUNCTION: Generate the Docker secrets that do not exist yet
+# (API key, JWT secret, MongoDB user and password) and sync the
+# API key into .env. Existing secrets are always kept.
 # ============================================================
-function New-JwtSecret {
-    $SecretFile = Join-Path $ScriptDir "docker\api\jwt_secret_key.txt"
-    if ((Test-Path $SecretFile) -and ((Get-Item $SecretFile).Length -gt 0)) {
-        Write-Host "JWT secret already exists: $SecretFile" -ForegroundColor Yellow
-        return
-    }
-    $bytes = New-Object byte[] 32
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    $rng.GetBytes($bytes)
-    $rng.Dispose()
-    $secret = ($bytes | ForEach-Object { $_.ToString("x2") }) -join ''
-    # No BOM and no trailing newline
-    [System.IO.File]::WriteAllText($SecretFile, $secret)
-    Write-Host "Generated JWT secret: $SecretFile" -ForegroundColor Green
+function New-DockerSecrets {
+    & (Join-Path $ScriptDir "generate_secrets.ps1")
 }
 
 # ============================================================
@@ -210,27 +199,27 @@ if (Test-Path $MarkerFile) {
 
     # Ensure .env has the correct Windows path (in case it was missing or deleted)
     Write-EnvVar -EnvVarName "OLLAMA_MODELS_PATH" -Path $OllamaPath -EnvFilePath $EnvFile
-    Write-Host "OLLAMA_MODELS_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
 
     # Ensure .env has the correct Windows path for Mongo
-    Write-EnvVar -EnvVarName "MONGO_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
-    Write-Host "MONGO_DATA_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
+    Write-EnvVar -EnvVarName "MONGODB_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
 
-    # The api container needs the JWT secret file (Docker secret)
-    New-JwtSecret
+    # Docker secrets used by the api and mongo containers
+    New-DockerSecrets
+
+    Write-Host "Volume paths resolved by docker compose:" -ForegroundColor DarkGray
+    Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | ForEach-Object { Write-Host "  $($_.Line.Trim())" -ForegroundColor DarkGray }
 
     # Start Docker Engine service and wait until the daemon is ready
     Start-DockerEngine
 
-    # 7. Builds, (re)creates, starts, and attaches to containers for the service.
+    # 7. Build the images and start the containers in the background.
     Write-Host "--------------------------------------------------------" -ForegroundColor Cyan
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
     Reset-DockerVolume -VolumeSuffix "ollama_models"
-    Reset-DockerVolume -VolumeSuffix "mongo_data"
-    Invoke-Expression "docker compose $ComposeFiles up --build"
-
-    # 8. Run containers in background
-    Invoke-Expression "docker compose $ComposeFiles up -d"
+    Reset-DockerVolume -VolumeSuffix "mongodb_data"
+    # Build the images and start the containers in the background (detached),
+    # so the script finishes instead of staying attached to the containers' logs
+    Invoke-Expression "docker compose $ComposeFiles up -d --build"
 
     Write-Host "============================================================" -ForegroundColor Green
     Write-Host " Installation complete!" -ForegroundColor Green
@@ -322,11 +311,11 @@ if (-not (Test-Path $MongoPath)) {
 # Write OLLAMA_MODELS_PATH to .env so docker-compose picks up the Windows path
 Write-EnvVar -EnvVarName "OLLAMA_MODELS_PATH" -Path $OllamaPath -EnvFilePath $EnvFile
 
-# New: Write MONGO_DATA_PATH to .env
-Write-EnvVar -EnvVarName "MONGO_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
+# New: Write MONGODB_DATA_PATH to .env
+Write-EnvVar -EnvVarName "MONGODB_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
 
-# The api container needs the JWT secret file (Docker secret)
-New-JwtSecret
+# Docker secrets used by the api and mongo containers
+New-DockerSecrets
 
 # 3. Check if Docker is already installed
 if (Get-Command docker -ErrorAction SilentlyContinue) {
@@ -339,14 +328,13 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     # Docker already present -- start engine and go straight to containers
     # Set working directory first so .env is always found by docker compose
     Set-Location $ScriptDir
-    Write-Host "OLLAMA_MODELS_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray
-    Write-Host "MONGO_DATA_PATH resolved to: $(Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | Select-Object -First 1)" -ForegroundColor DarkGray # New: Mongo path resolution
+    Write-Host "Volume paths resolved by docker compose:" -ForegroundColor DarkGray
+    Invoke-Expression "docker compose $ComposeFiles config" | Select-String "device:" | ForEach-Object { Write-Host "  $($_.Line.Trim())" -ForegroundColor DarkGray }
     Start-DockerEngine
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
     Reset-DockerVolume -VolumeSuffix "ollama_models"
-    Reset-DockerVolume -VolumeSuffix "mongo_data"
-    Invoke-Expression "docker compose $ComposeFiles up --build"
-    Invoke-Expression "docker compose $ComposeFiles up -d"
+    Reset-DockerVolume -VolumeSuffix "mongodb_data"
+    Invoke-Expression "docker compose $ComposeFiles up -d --build"
 
     Write-Host "============================================================" -ForegroundColor Green
     Write-Host " Installation complete!" -ForegroundColor Green
