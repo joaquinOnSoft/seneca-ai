@@ -88,7 +88,8 @@ class MongoDatabase:
     def get_conversations(self, user_id, skip=0, limit=20, include_messages=False):
         if self.conversations_collection is None:
             raise PyMongoError("Conversations collection not initialized.")
-        projection = None if include_messages else {"messages": 0}
+        # pending_turn is internal chat state (see seneca.api.chat), never listed
+        projection = {"pending_turn": 0} if include_messages else {"messages": 0, "pending_turn": 0}
         return list(self.conversations_collection.find(
             {"user_id": user_id}, projection
         ).sort("created_at", -1).skip(skip).limit(limit))
@@ -137,6 +138,29 @@ class MongoDatabase:
             {"_id": ObjectId(conv_id_str), "user_id": user_id},
             {"$push": {"messages": {"$each": messages}},
              "$set": {"updated_at": datetime.now(timezone.utc)}}
+        )
+        return result.matched_count > 0
+
+    def set_pending_turn(self, conv_id_str, user_id, pending_turn):
+        """Store the state of a chat turn that is waiting for client-side tool results."""
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        result = self.conversations_collection.update_one(
+            {"_id": ObjectId(conv_id_str), "user_id": user_id},
+            {"$set": {"pending_turn": pending_turn, "updated_at": datetime.now(timezone.utc)}}
+        )
+        return result.matched_count > 0
+
+    def finish_turn(self, conv_id_str, user_id, messages):
+        """Append the messages produced by a chat turn and drop its pending state, atomically."""
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        update = {"$unset": {"pending_turn": ""},
+                  "$set": {"updated_at": datetime.now(timezone.utc)}}
+        if messages:
+            update["$push"] = {"messages": {"$each": messages}}
+        result = self.conversations_collection.update_one(
+            {"_id": ObjectId(conv_id_str), "user_id": user_id}, update
         )
         return result.matched_count > 0
 

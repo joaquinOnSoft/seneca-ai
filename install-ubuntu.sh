@@ -10,10 +10,11 @@ source ./select_ollama_model.sh
 REAL_USER=${SUDO_USER:-$USER}
 
 # 1. Directory Preparation (This runs regardless of Docker installation)
-echo "Preparing directories for Ollama and MongoDB..."
+echo "Preparing directories for Ollama, MongoDB and the Hugging Face cache..."
 
 sudo mkdir -p /opt/senecaai/volumes/ollama
 sudo mkdir -p /opt/senecaai/volumes/mongo
+sudo mkdir -p /opt/senecaai/volumes/huggingface
 sudo chown -R "$REAL_USER":"$REAL_USER" /opt/senecaai
 
 # 2. Check if Docker is already installed

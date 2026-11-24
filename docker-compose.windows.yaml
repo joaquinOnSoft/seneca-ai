@@ -28,9 +28,11 @@
 services:
 
   api:
-    volumes: !reset
+    volumes: !override
       # Source code mounted for hot-reload — same as Linux
       - ./src:/app/src
+      # Hugging Face cache (Whisper model) — same as Linux
+      - huggingface_cache:/root/.cache/huggingface
       # PulseAudio socket removed: does not exist on Windows hosts
 
     devices: !reset [] # /dev/snd (ALSA) does not exist on Windows
@@ -46,8 +48,8 @@ services:
 #  Files\..." would need every backslash doubled ("C:\\Program Files\\...").
 #  Single quotes avoid that trap entirely.
 #
-#  ${OLLAMA_MODELS_PATH:-...} / ${MONGODB_DATA_PATH:-...} let you still
-#  override either path per-machine via a local .env file without editing
+#  ${OLLAMA_MODELS_PATH:-...} / ${MONGODB_DATA_PATH:-...} / ${HF_CACHE_PATH:-...}
+#  let you still override any of these paths per-machine via a local .env file without editing
 #  this file.
 volumes:
   ollama_models:
@@ -57,3 +59,7 @@ volumes:
   mongodb_data:
     driver_opts:
       device: '${MONGODB_DATA_PATH:-C:\Program Files\SenecaAI\volumes\mongodb}'
+
+  huggingface_cache:
+    driver_opts:
+      device: '${HF_CACHE_PATH:-C:\Program Files\SenecaAI\volumes\huggingface}'

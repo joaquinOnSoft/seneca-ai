@@ -39,14 +39,14 @@ seneca-ai/
 ├── src/
 │   └── seneca/
 │       ├── api/
-│       │   ├── api.py           # Flask REST API (STT, auth, conversations)
-│       │   ├── client.py        # Typed HTTP client for the REST API
+│       │   ├── api.py           # Flask REST API (STT, auth, chat, conversations)
+│       │   ├── chat.py          # Server-side chat: LLM providers, prompt, tool loop
+│       │   ├── client.py        # Typed HTTP client for the REST API (incl. SSE chat)
 │       │   └── database.py      # MongoDB access layer
 │       ├── core/
-│       │   ├── agent.py         # LangChain AI agent (streaming)
+│       │   ├── agent.py         # Desktop chat agent: streams replies from the API, runs tools
 │       │   ├── conversation.py  # Domain models (Message, Conversation)
-│       │   ├── storage.py       # Conversation stores (JSON in ~/.seneca/ + factory)
-│       │   └── api_storage.py   # Conversation store backed by the REST API
+│       │   └── api_storage.py   # Conversation history (read/delete) through the REST API
 │       ├── i18n/
 │       │   └── locale.py        # Babel-backed i18n helper
 │       ├── ui/
@@ -121,6 +121,10 @@ cp .env.example .env
 
 #### Supported providers
 
+The LLM is called by the **API server**, not by the desktop app: the
+`api` container reads these variables from `.env` (apply changes with
+`docker compose up -d`).
+
 | `LLM_PROVIDER`     | Required env vars                      |
 |--------------------|----------------------------------------|
 | `openai`           | `OPENAI_API_KEY`, `OPENAI_MODEL`       |
@@ -135,19 +139,29 @@ python main.py
 
 ---
 
-## Conversation storage
+## Chat and conversation storage
 
-Conversations are saved through the Seneca AI REST API in MongoDB
-(`CONVERSATION_STORAGE=api`, the default). Set `CONVERSATION_STORAGE=local`
-to keep them in `~/.seneca/conversations.json` instead.
+The desktop app is a thin client of the Seneca AI REST API:
 
-The desktop app authenticates with `SENECA_AI_API_KEY` and stores the
-conversations on behalf of `SENECA_USER_ID` (sent in the
-`X-SENECA-AI-USER-ID` header). If it is empty, they are stored under the
-generic user `api_key_user`.
+1. It sends the user's message to `POST /senecaai/v1/chat`.
+2. The API builds the prompt from the conversation stored in MongoDB, calls
+   the LLM (`LLM_PROVIDER`) and streams the reply back as Server-Sent Events.
+3. The API stores both the message and the reply. A cancelled reply ("stop"
+   button) is stored up to the point where it was interrupted.
+
+Tools such as "open in Notepad" act on the user's computer, so the app
+runs them when the model asks for them and sends the results back. The
+protocol is described in [docs/chat-api.md](docs/chat-api.md).
+
+The desktop app authenticates with `SENECA_AI_API_KEY` and works on behalf
+of `SENECA_USER_ID` (sent in the `X-SENECA-AI-USER-ID` header). If it is
+empty, conversations are stored under the generic user `api_key_user`.
 
 | Method   | Resource                                     | Description                                                       |
 |----------|----------------------------------------------|-------------------------------------------------------------------|
+| `POST`   | `/senecaai/v1/chat`                          | Send a message and stream the reply (SSE); creates the conversation if `conversation_id` is omitted |
+| `GET`    | `/senecaai/v1/chat/capabilities`             | LLM provider, model and tool-calling support                      |
+
 | `GET`    | `/senecaai/v1/conversations`                 | Paginated list, newest first (`convPerPage` ≤ 100, `numPage`). Messages only with `includeMessages=true` |
 | `GET`    | `/senecaai/v1/conversations/{id}`            | One conversation with all its messages                            |
 | `POST`   | `/senecaai/v1/conversations`                 | Create a conversation (`201` + `Location` header)                 |
@@ -180,7 +194,8 @@ needed**.
 
 ```bash
 # All the tests
-# (integration tests are skipped unless OPENAI_API_KEY or ANTHROPIC_API_KEY is set)
+# (tests/integration is skipped unless the API with the /chat endpoint is
+#  running at SENECA_API_BASE_URL; it chats with the real LLM)
 pytest
 
 # Unit tests only (no credentials needed)
@@ -189,7 +204,10 @@ pytest tests/unit/
 # REST API, HTTP client and MongoDB layer
 pytest tests/seneca/api/
 
-# API-backed conversation store
+# Server-side chat (fake LLM, in-memory database)
+pytest tests/seneca/api/test_chat.py
+
+# Desktop chat agent and API-backed conversation store
 pytest tests/seneca/core/
 
 # A single file, test or group of tests

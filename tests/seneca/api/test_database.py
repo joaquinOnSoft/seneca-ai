@@ -120,8 +120,8 @@ def test_get_conversations(mock_db_instance, sample_conversation_data):
     conversations = mock_db_instance.get_conversations("test_user_1")
     assert len(conversations) == 1
     assert conversations[0]["_id"] == sample_conversation_data["_id"]
-    mock_db_instance.conversations_collection.find.assert_called_once_with({"user_id": "test_user_1"},
-                                                                           {"messages": 0})
+    mock_db_instance.conversations_collection.find.assert_called_once_with(
+        {"user_id": "test_user_1"}, {"messages": 0, "pending_turn": 0})
 
 
 def test_get_conversation_by_id_with_user_id(mock_db_instance, sample_conversation_data):
@@ -265,12 +265,13 @@ def test_connect_twice_is_a_noop(mock_db_instance):
 def test_get_conversations_excludes_messages_by_default(mock_db_instance):
     mock_db_instance.get_conversations("test_user_1")
     mock_db_instance.conversations_collection.find.assert_called_once_with(
-        {"user_id": "test_user_1"}, {"messages": 0})
+        {"user_id": "test_user_1"}, {"messages": 0, "pending_turn": 0})
 
 
 def test_get_conversations_including_messages(mock_db_instance):
     mock_db_instance.get_conversations("test_user_1", include_messages=True)
-    mock_db_instance.conversations_collection.find.assert_called_once_with({"user_id": "test_user_1"}, None)
+    mock_db_instance.conversations_collection.find.assert_called_once_with(
+        {"user_id": "test_user_1"}, {"pending_turn": 0})
 
 
 def test_create_conversation_sets_updated_at(mock_db_instance):
@@ -293,6 +294,35 @@ def test_append_messages_success(mock_db_instance, sample_conversation_data):
 def test_append_messages_not_found(mock_db_instance):
     mock_db_instance.conversations_collection.update_one.return_value.matched_count = 0
     assert mock_db_instance.append_messages(str(ObjectId()), "test_user_1", []) is False
+
+
+def test_set_pending_turn(mock_db_instance, sample_conversation_data):
+    mock_db_instance.conversations_collection.update_one.return_value.matched_count = 1
+    pending = {"messages": [], "reply": "Hi", "iterations": 1, "awaiting": ["c1"]}
+    assert mock_db_instance.set_pending_turn(str(sample_conversation_data["_id"]), "test_user_1", pending) is True
+    mock_db_instance.conversations_collection.update_one.assert_called_once_with(
+        {"_id": sample_conversation_data["_id"], "user_id": "test_user_1"},
+        {"$set": {"pending_turn": pending, "updated_at": ANY}}
+    )
+
+
+def test_finish_turn_appends_messages_and_drops_pending_state(mock_db_instance, sample_conversation_data):
+    mock_db_instance.conversations_collection.update_one.return_value.matched_count = 1
+    messages = [{"role": "assistant", "content": "Hi", "timestamp": "2023-10-28T10:00:00Z"}]
+    assert mock_db_instance.finish_turn(str(sample_conversation_data["_id"]), "test_user_1", messages) is True
+    mock_db_instance.conversations_collection.update_one.assert_called_once_with(
+        {"_id": sample_conversation_data["_id"], "user_id": "test_user_1"},
+        {"$unset": {"pending_turn": ""}, "$set": {"updated_at": ANY},
+         "$push": {"messages": {"$each": messages}}}
+    )
+
+
+def test_finish_turn_without_messages_only_drops_pending_state(mock_db_instance, sample_conversation_data):
+    mock_db_instance.conversations_collection.update_one.return_value.matched_count = 1
+    mock_db_instance.finish_turn(str(sample_conversation_data["_id"]), "test_user_1", [])
+    update = mock_db_instance.conversations_collection.update_one.call_args.args[1]
+    assert "$push" not in update
+    assert update["$unset"] == {"pending_turn": ""}
 
 
 def test_delete_conversation_success(mock_db_instance, sample_conversation_data):

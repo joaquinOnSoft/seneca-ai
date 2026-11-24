@@ -30,11 +30,17 @@ class Message:
 
 @dataclass
 class Conversation:
-    """An ordered sequence of messages with a unique identifier."""
+    """An ordered sequence of messages with a unique identifier.
+
+    A new conversation has a temporary local ``id`` and ``stored=False``
+    until the server creates it with the first message; the server then
+    assigns the definitive ``id`` and ``title``.
+    """
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     title: str = "Nueva conversación"
     messages: list[Message] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
+    stored: bool = False
 
     def add_message(self, role: Role, content: str) -> Message:
         """Append a new :class:`Message` and return it."""

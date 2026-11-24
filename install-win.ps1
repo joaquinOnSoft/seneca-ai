@@ -8,6 +8,7 @@ $MarkerFile   = Join-Path $ScriptDir "installer-2nd-execution.txt"
 $EnvFile      = Join-Path $ScriptDir ".env"
 $OllamaPath   = "C:\ProgramData\senecaai\volumes\ollama"
 $MongoPath    = "C:\ProgramData\senecaai\volumes\mongo" # New: Mongo data path
+$HfCachePath  = "C:\ProgramData\senecaai\volumes\huggingface" # Hugging Face cache (Whisper model)
 
 # Docker Compose command: base file + Windows override
 $ComposeFiles = "-f docker-compose.yaml -f docker-compose.windows.yaml"
@@ -203,6 +204,9 @@ if (Test-Path $MarkerFile) {
     # Ensure .env has the correct Windows path for Mongo
     Write-EnvVar -EnvVarName "MONGODB_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
 
+    # Ensure .env has the correct Windows path for the Hugging Face cache
+    Write-EnvVar -EnvVarName "HF_CACHE_PATH" -Path $HfCachePath -EnvFilePath $EnvFile
+
     # Docker secrets used by the api and mongo containers
     New-DockerSecrets
 
@@ -217,6 +221,7 @@ if (Test-Path $MarkerFile) {
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
     Reset-DockerVolume -VolumeSuffix "ollama_models"
     Reset-DockerVolume -VolumeSuffix "mongodb_data"
+    Reset-DockerVolume -VolumeSuffix "huggingface_cache"
     # Build the images and start the containers in the background (detached),
     # so the script finishes instead of staying attached to the containers' logs
     Invoke-Expression "docker compose $ComposeFiles up -d --build"
@@ -308,11 +313,23 @@ if (-not (Test-Path $MongoPath)) {
     Write-Host "Directory already exists: $MongoPath" -ForegroundColor Yellow
 }
 
+# Prepare the directory for the Hugging Face cache (Whisper model)
+Write-Host "Preparing directories for the Hugging Face cache..." -ForegroundColor Cyan
+if (-not (Test-Path $HfCachePath)) {
+    New-Item -ItemType Directory -Path $HfCachePath -Force | Out-Null
+    Write-Host "Created directory: $HfCachePath" -ForegroundColor Green
+} else {
+    Write-Host "Directory already exists: $HfCachePath" -ForegroundColor Yellow
+}
+
 # Write OLLAMA_MODELS_PATH to .env so docker-compose picks up the Windows path
 Write-EnvVar -EnvVarName "OLLAMA_MODELS_PATH" -Path $OllamaPath -EnvFilePath $EnvFile
 
 # New: Write MONGODB_DATA_PATH to .env
 Write-EnvVar -EnvVarName "MONGODB_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvFile
+
+# Write HF_CACHE_PATH to .env
+Write-EnvVar -EnvVarName "HF_CACHE_PATH" -Path $HfCachePath -EnvFilePath $EnvFile
 
 # Docker secrets used by the api and mongo containers
 New-DockerSecrets
@@ -334,6 +351,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Host "Building and starting containers..." -ForegroundColor Cyan
     Reset-DockerVolume -VolumeSuffix "ollama_models"
     Reset-DockerVolume -VolumeSuffix "mongodb_data"
+    Reset-DockerVolume -VolumeSuffix "huggingface_cache"
     Invoke-Expression "docker compose $ComposeFiles up -d --build"
 
     Write-Host "============================================================" -ForegroundColor Green

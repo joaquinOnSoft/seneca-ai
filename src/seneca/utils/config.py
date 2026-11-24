@@ -24,15 +24,16 @@ load_dotenv(dotenv_path=_ENV_PATH)
 _ALLOWED_FASTER_WHISPER_MODEL_SIZES = {"tiny", "base", "small", "medium", "large-v3"}
 _ALLOWED_FASTER_WHISPER_COMPUTE_TYPES = {"int8", "float16"}
 _ALLOWED_STT_BACKENDS = {"faster-whisper", "google"}
-_ALLOWED_CONVERSATION_STORAGES = {"api", "local"}
 
 
 @dataclass(frozen=True)
 class AppConfig:
     """Immutable snapshot of runtime configuration."""
 
+    # LLM used by the API server (seneca.api.chat): openai | ollama | anthropic.
+    # The desktop app no longer calls the LLM; it talks to the API.
     llm_provider: str = field(
-        default_factory=lambda: os.getenv("LLM_PROVIDER", "openai")
+        default_factory=lambda: os.getenv("LLM_PROVIDER", "ollama")
     )
     openai_api_key: str = field(
         default_factory=lambda: os.getenv("OPENAI_API_KEY", "")
@@ -64,11 +65,22 @@ class AppConfig:
             os.getenv("MAX_CONVERSATIONS", "20")
         )
     )
-    # Where conversations are saved: "api" (Seneca AI REST API) | "local" (~/.seneca)
-    conversation_storage: str = field(
-        default_factory=lambda: os.getenv("CONVERSATION_STORAGE", "api")
+    # Stored messages sent to the LLM as context (most recent ones)
+    chat_history_max_messages: int = field(
+        default_factory=lambda: int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "50"))
     )
-    
+    # Seconds the desktop app waits for the next chunk of a streamed reply
+    # (the first token can take long while Ollama loads the model)
+    chat_read_timeout: float = field(
+        default_factory=lambda: float(os.getenv("CHAT_READ_TIMEOUT", "300"))
+    )
+    # Worker threads of the API server. Each streamed chat reply keeps one
+    # busy until it ends, so this bounds the concurrent replies.
+    api_threads: int = field(
+        default_factory=lambda: int(os.getenv("API_THREADS", "16"))
+    )
+
+
     # STT configuration
     stt_backend: str = field(
         default_factory=lambda: os.getenv("STT_BACKEND", "faster-whisper")
@@ -154,10 +166,6 @@ class AppConfig:
         if self.stt_backend not in _ALLOWED_STT_BACKENDS:            
             logger.warning(f"Invalid STT_BACKEND '{self.stt_backend}'. Defaulting to 'faster-whisper'.")
             object.__setattr__(self, 'stt_backend', 'faster-whisper')
-
-        if self.conversation_storage not in _ALLOWED_CONVERSATION_STORAGES:
-            logger.warning(f"Invalid CONVERSATION_STORAGE '{self.conversation_storage}'. Defaulting to 'api'.")
-            object.__setattr__(self, 'conversation_storage', 'api')
 
         # Basic validation for whisper_model_size
         if self.whisper_model_size not in _ALLOWED_FASTER_WHISPER_MODEL_SIZES:

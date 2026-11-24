@@ -34,14 +34,21 @@ Usage example
 ...     ConversationMessage("assistant", "¡Hola!", "2026-01-01T10:00:02+00:00"),
 ... ])
 >>> summaries = client.list_conversations(per_page=20)   # without messages
+>>>
+>>> # Chat: the server calls the LLM and streams the reply
+>>> with client.stream_chat(content="Hola") as stream:
+...     for event in stream:
+...         if event.event == "token":
+...             print(event.data["text"], end="")
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, BinaryIO, Dict, List, Optional, Union
+from typing import Any, BinaryIO, Dict, Iterator, List, Optional, Union
 
 import requests
 from requests.adapters import HTTPAdapter, Retry
@@ -166,6 +173,79 @@ class ConversationData:
         )
 
 
+@dataclass(frozen=True)
+class ChatCapabilities:
+    """LLM used by the server's chat (``/chat/capabilities``)."""
+
+    provider: str
+    model: str
+    tool_calling: bool
+
+
+@dataclass(frozen=True)
+class ChatEvent:
+    """One Server-Sent Event of a streamed chat reply.
+
+    ``event`` is ``conversation``, ``token``, ``tool_calls``, ``done`` or
+    ``error``; ``data`` is the decoded JSON payload (see docs/chat-api.md).
+    """
+
+    event: str
+    data: Dict[str, Any]
+
+
+class ChatStream:
+    """Iterator over the :class:`ChatEvent` objects of a streamed reply.
+
+    Call :meth:`close` (possibly from another thread) to cancel the reply:
+    the server notices the closed connection, stops the LLM and stores the
+    text generated so far.
+    """
+
+    def __init__(self, response: requests.Response) -> None:
+        self._response = response
+        self._closed = False
+
+    def __iter__(self) -> Iterator[ChatEvent]:
+        event, data_lines = "message", []
+        try:
+            for line in self._response.iter_lines(decode_unicode=True):
+                if line is None:
+                    continue
+                if line == "":
+                    # A blank line ends the event
+                    if data_lines:
+                        yield ChatEvent(event, json.loads("\n".join(data_lines)))
+                    event, data_lines = "message", []
+                elif line.startswith(":"):
+                    continue  # SSE comment (keep-alive)
+                elif line.startswith("event:"):
+                    event = line[len("event:"):].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line[len("data:"):].lstrip())
+        except (requests.RequestException, AttributeError, ValueError, OSError):
+            # Closing the response from another thread interrupts the read
+            if not self._closed:
+                raise
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        """Close the connection (cancels the reply if it is still running)."""
+        self._closed = True
+        self._response.close()
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def __enter__(self) -> "ChatStream":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # noqa: ANN001
+        self.close()
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -210,13 +290,19 @@ class SenecaApiClient:
     max_retries: int = 3
     correlation_id: Optional[str] = None
     user_id: Optional[str] = None
+    chat_read_timeout: float = 300.0
+    """Seconds to wait for the next chunk of a streamed chat reply."""
     _session: requests.Session = field(init=False, repr=False)
+    _stream_session: requests.Session = field(init=False, repr=False)
 
     # -- lifecycle -----------------------------------------------------------
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
         self._session = self._build_session()
+        # Chat requests are never retried automatically: a retried POST could
+        # store the user's message twice
+        self._stream_session = requests.Session()
 
     def _build_session(self) -> requests.Session:
         """Create a :class:`requests.Session` with retry logic."""
@@ -235,8 +321,9 @@ class SenecaApiClient:
         return session
 
     def close(self) -> None:
-        """Close the underlying HTTP session."""
+        """Close the underlying HTTP sessions."""
         self._session.close()
+        self._stream_session.close()
 
     def __enter__(self) -> "SenecaApiClient":
         return self
@@ -589,3 +676,83 @@ class SenecaApiClient:
 
         response = self._session.delete(url, headers=self._headers(), timeout=self.timeout)
         self._raise_for_status(response)
+
+    # -- chat ----------------------------------------------------------------
+
+    def get_chat_capabilities(self) -> ChatCapabilities:
+        """Return the LLM provider/model used by the server and whether it supports tools.
+
+        ``GET /senecaai/v1/chat/capabilities``
+        """
+        url = f"{self.base_url}/senecaai/v1/chat/capabilities"
+        logger.debug("GET %s", url)
+
+        response = self._session.get(url, headers=self._headers(), timeout=self.timeout)
+        self._raise_for_status(response)
+        data = response.json()
+        return ChatCapabilities(
+            provider=data.get("provider", ""),
+            model=data.get("model", ""),
+            tool_calling=bool(data.get("tool_calling", False)),
+        )
+
+    def stream_chat(
+        self,
+        *,
+        content: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_results: Optional[List[Dict[str, str]]] = None,
+    ) -> ChatStream:
+        """Send a user message (or tool results) and stream the reply.
+
+        ``POST /senecaai/v1/chat``
+
+        Parameters
+        ----------
+        content:
+            The user's message. Mutually exclusive with *tool_results*.
+        conversation_id:
+            Existing conversation; omit it to create a new one (its id
+            arrives in the first ``conversation`` event).
+        tools:
+            Tools the model may call, as ``{"name", "description",
+            "parameters"}`` (JSON schema). They are executed by the client.
+        tool_results:
+            ``[{"tool_call_id", "content"}]`` for every call of the last
+            ``tool_calls`` event; requires *conversation_id*.
+
+        Raises
+        ------
+        SenecaApiError
+            (or a subclass) if the server rejects the request before
+            streaming starts (400, 401, 403, 404, 409, 503...).
+        """
+        body: Dict[str, Any] = {}
+        if conversation_id:
+            body["conversation_id"] = conversation_id
+        if content is not None:
+            body["content"] = content
+        if tool_results is not None:
+            body["tool_results"] = tool_results
+        if tools:
+            body["tools"] = tools
+
+        url = f"{self.base_url}/senecaai/v1/chat"
+        logger.debug("POST %s  (conversation=%s)", url, conversation_id)
+
+        headers = self._headers()
+        headers["Accept"] = "text/event-stream"
+        response = self._stream_session.post(
+            url,
+            headers=headers,
+            json=body,
+            stream=True,
+            timeout=(self.timeout, self.chat_read_timeout),
+        )
+        if not response.ok:
+            try:
+                self._raise_for_status(response)
+            finally:
+                response.close()
+        return ChatStream(response)

@@ -33,11 +33,42 @@ Container that exposes a REST API used by Seneca AI:
  - `POST` **/senecaai/v1/stt** Speech-to-Text (STT) Endpoint
  - `GET` **/senecaai/v1/stt/languages** Get Supported STT Languages
  - `POST` **/senecaai/v1/auth/login**, **/auth/refresh**, **/auth/logout** Authentication (JWT)
+ - `POST` **/senecaai/v1/chat** Send a message and stream the reply (Server-Sent Events)
+ - `GET` **/senecaai/v1/chat/capabilities** LLM provider, model and tool-calling support
  - `GET`, `POST` **/senecaai/v1/conversations** List / create conversations
  - `GET`, `PATCH`, `DELETE` **/senecaai/v1/conversations/{id}** Get / update / delete a conversation
  - `POST` **/senecaai/v1/conversations/{id}/messages** Append messages to a conversation
 
 A Postman collection with all the methods is available in `assets/api/Seneca AI.postman_collection.json`.
+
+The API calls the chat LLM (the desktop app only talks to the API). The
+container takes `LLM_PROVIDER`, the model names and the OpenAI/Anthropic keys
+from the host `.env`. Apply changes with `docker compose up -d`. See
+[chat-api.md](chat-api.md).
+
+The faster-whisper model is downloaded from Hugging Face on the first start and
+kept in the `huggingface_cache` volume (`/opt/senecaai/volumes/huggingface`,
+or `HF_CACHE_PATH`), so rebuilding or re-creating the container does not
+download it again.
+
+### Network and VPNs
+
+All the containers share the `llm_net` network. If the host reaches the
+Internet through a VPN whose MTU is smaller than Docker's default of 1500 (for
+example 1280 for WireGuard VPNs such as Surfshark), the larger packets are
+silently dropped. HTTPS connections from the containers then hang: the TLS
+handshake never finishes, while plain HTTP and small requests still work. The
+Whisper model download is the first thing to fail.
+
+Set the VPN's MTU (`ip link` shows it on the VPN interface) in `.env` and
+re-create the network:
+
+```bash
+# .env
+DOCKER_NETWORK_MTU=1280
+
+docker compose down && docker compose up -d   # volumes (data, models) are kept
+```
 
 ### Secrets
 

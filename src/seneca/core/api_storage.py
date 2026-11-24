@@ -1,28 +1,21 @@
 """
-src/seneca/core/api_storage.py – Conversation store backed by the Seneca-AI REST API.
+src/seneca/core/api_storage.py – Conversation history backed by the Seneca-AI REST API.
 
-Conversations are persisted in MongoDB through the ``/conversations``
-endpoints.  The history list only downloads conversation summaries;
-the messages of a conversation are fetched on demand with
-:meth:`ApiConversationStore.ensure_messages`.  Once a conversation is
-stored, new turns are sent with the append-messages endpoint so the
-whole conversation is never re-uploaded.
+The server stores every message itself while it produces the reply
+(``POST /senecaai/v1/chat``, see :mod:`seneca.core.agent`), so this store
+only reads and deletes: the history list downloads conversation
+summaries, and the messages of a conversation are fetched on demand with
+:meth:`ApiConversationStore.ensure_messages`.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 from datetime import datetime
 
 import requests
 
-from seneca.api.client import (
-    ConversationData,
-    ConversationMessage,
-    SenecaApiClient,
-    SenecaApiError,
-)
+from seneca.api.client import ConversationData, SenecaApiClient, SenecaApiError
 from seneca.core.conversation import Conversation, Message, Role
 from seneca.utils.config import config
 
@@ -31,21 +24,21 @@ logger = logging.getLogger(__name__)
 # Maximum page size accepted by the API
 _MAX_PAGE_SIZE = 100
 
-_ROLE_TO_API = {Role.USER: "user", Role.ASSISTANT: "assistant"}
-_ROLE_FROM_API = {value: key for key, value in _ROLE_TO_API.items()}
+_ROLE_FROM_API = {"user": Role.USER, "assistant": Role.ASSISTANT}
 
 # Errors that must never crash the UI: API errors and network failures
-_STORE_ERRORS = (SenecaApiError, requests.RequestException)
+STORE_ERRORS = (SenecaApiError, requests.RequestException)
 
 
-def message_to_api(msg: Message) -> ConversationMessage:
-    """Convert a domain :class:`Message` to the API representation."""
-    # The app uses naive local datetimes; send them with their UTC offset
-    timestamp = msg.timestamp if msg.timestamp.tzinfo else msg.timestamp.astimezone()
-    return ConversationMessage(
-        role=_ROLE_TO_API[msg.role],
-        content=msg.content,
-        timestamp=timestamp.isoformat(),
+def create_api_client(timeout: float = 10.0, max_retries: int = 1) -> SenecaApiClient:
+    """API client configured from ``.env`` (base URL, API key, user)."""
+    return SenecaApiClient(
+        base_url=config.seneca_api_base_url,
+        api_key=config.seneca_ai_api_key,
+        user_id=config.seneca_user_id or None,
+        timeout=timeout,
+        max_retries=max_retries,
+        chat_read_timeout=config.chat_read_timeout,
     )
 
 
@@ -59,7 +52,7 @@ def _parse_datetime(value: str) -> datetime:
 
 def conversation_from_api(data: ConversationData) -> Conversation:
     """Convert an API :class:`ConversationData` to a domain :class:`Conversation`."""
-    conv = Conversation(id=data.id, title=data.title)
+    conv = Conversation(id=data.id, title=data.title, stored=True)
     conv.created_at = _parse_datetime(data.created_at)
     conv.messages = [
         Message(
@@ -73,7 +66,7 @@ def conversation_from_api(data: ConversationData) -> Conversation:
 
 
 class ApiConversationStore:
-    """Persist conversations through the Seneca-AI REST API.
+    """Read and delete the user's conversations through the Seneca-AI REST API.
 
     All methods log and swallow API/network errors so that a stopped
     API server never breaks the chat UI.
@@ -81,21 +74,10 @@ class ApiConversationStore:
 
     def __init__(self, client: SenecaApiClient) -> None:
         self._client = client
-        # conversation id -> number of its messages already stored on the
-        # server, or None when only the summary has been downloaded
-        self._synced: dict[str, int | None] = {}
-        self._lock = threading.Lock()
 
     @classmethod
     def from_config(cls) -> "ApiConversationStore":
-        client = SenecaApiClient(
-            base_url=config.seneca_api_base_url,
-            api_key=config.seneca_ai_api_key,
-            user_id=config.seneca_user_id or None,
-            timeout=10.0,
-            max_retries=1,
-        )
-        return cls(client)
+        return cls(create_api_client())
 
     def load_conversations(self, limit: int = 20) -> list[Conversation]:
         """Return the summaries (without messages) of the *limit* most recent conversations."""
@@ -103,65 +85,28 @@ class ApiConversationStore:
             summaries = self._client.list_conversations(
                 per_page=max(1, min(limit, _MAX_PAGE_SIZE))
             )
-        except _STORE_ERRORS as exc:
+        except STORE_ERRORS as exc:
             logger.warning("Could not load conversations from the API: %s", exc)
             return []
-
-        conversations = [conversation_from_api(s) for s in summaries]
-        with self._lock:
-            for conv in conversations:
-                self._synced[conv.id] = None
-        return conversations
+        return [conversation_from_api(s) for s in summaries]
 
     def ensure_messages(self, conv: Conversation) -> None:
         """Download the messages of *conv* if only its summary is loaded."""
-        with self._lock:
-            if conv.id not in self._synced or self._synced[conv.id] is not None:
-                return
-            try:
-                full = self._client.get_conversation(conv.id)
-            except _STORE_ERRORS as exc:
-                logger.error("Could not load conversation %s from the API: %s", conv.id, exc)
-                return
-            conv.messages = conversation_from_api(full).messages
-            self._synced[conv.id] = len(conv.messages)
-
-    def save_conversation(self, conv: Conversation) -> None:
-        """Create *conv* on the server or append its new messages.
-
-        On creation, ``conv.id`` is replaced with the id assigned by the server.
-        """
-        with self._lock:
-            # Snapshot: the UI thread may add messages while we are sending
-            messages = list(conv.messages)
-            try:
-                if conv.id not in self._synced:
-                    created = self._client.create_conversation(
-                        conv.derive_title(), [message_to_api(m) for m in messages]
-                    )
-                    conv.id = created.id
-                elif self._synced[conv.id] is None:
-                    # Messages were never downloaded: the local copy is the reference
-                    self._client.update_conversation(
-                        conv.id, messages=[message_to_api(m) for m in messages]
-                    )
-                else:
-                    pending = messages[self._synced[conv.id]:]
-                    if pending:
-                        self._client.append_messages(
-                            conv.id, [message_to_api(m) for m in pending]
-                        )
-                self._synced[conv.id] = len(messages)
-            except _STORE_ERRORS as exc:
-                logger.error("Could not save conversation %s through the API: %s", conv.id, exc)
+        if not conv.stored or conv.messages:
+            return
+        try:
+            full = self._client.get_conversation(conv.id)
+        except STORE_ERRORS as exc:
+            logger.error("Could not load conversation %s from the API: %s", conv.id, exc)
+            return
+        conv.messages = conversation_from_api(full).messages
 
     def delete_conversation(self, conv: Conversation) -> None:
         """Delete *conv* from the server (no-op if it was never stored)."""
-        with self._lock:
-            if conv.id not in self._synced:
-                return
-            try:
-                self._client.delete_conversation(conv.id)
-                del self._synced[conv.id]
-            except _STORE_ERRORS as exc:
-                logger.error("Could not delete conversation %s through the API: %s", conv.id, exc)
+        if not conv.stored:
+            return
+        try:
+            self._client.delete_conversation(conv.id)
+            conv.stored = False
+        except STORE_ERRORS as exc:
+            logger.error("Could not delete conversation %s through the API: %s", conv.id, exc)

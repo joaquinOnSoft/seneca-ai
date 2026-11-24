@@ -2,6 +2,8 @@
 tests/seneca/core/test_api_storage.py – Unit tests for :class:`ApiConversationStore`.
 
 The :class:`SenecaApiClient` is replaced by a mock, so no API server is needed.
+The store only reads and deletes: the server stores the messages itself
+while it produces each reply (see tests/seneca/core/test_agent.py).
 """
 
 import sys
@@ -15,12 +17,8 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "src"))
 
 from seneca.api.client import ConversationData, ConversationMessage, SenecaServerError
-from seneca.core.api_storage import (
-    ApiConversationStore,
-    conversation_from_api,
-    message_to_api,
-)
-from seneca.core.conversation import Conversation, Message, Role
+from seneca.core.api_storage import ApiConversationStore, conversation_from_api
+from seneca.core.conversation import Conversation, Role
 
 SERVER_ID = "6553f1a2b3c4d5e6f7a8b9c0"
 
@@ -38,9 +36,7 @@ def _conv_data(conv_id=SERVER_ID, messages=()):
 
 @pytest.fixture
 def api_client():
-    client = MagicMock()
-    client.create_conversation.return_value = _conv_data()
-    return client
+    return MagicMock()
 
 
 @pytest.fixture
@@ -48,7 +44,8 @@ def store(api_client):
     return ApiConversationStore(api_client)
 
 
-def _chat(*texts):
+def _local_chat(*texts):
+    """A conversation that only exists in the app (not stored yet)."""
     conv = Conversation()
     for i, text in enumerate(texts):
         conv.add_message(Role.USER if i % 2 == 0 else Role.ASSISTANT, text)
@@ -56,14 +53,6 @@ def _chat(*texts):
 
 
 class TestConversions:
-    def test_roles_are_sent_in_lowercase(self):
-        assert message_to_api(Message(Role.USER, "hi")).role == "user"
-        assert message_to_api(Message(Role.ASSISTANT, "hi")).role == "assistant"
-
-    def test_naive_timestamp_is_sent_with_offset(self):
-        msg = message_to_api(Message(Role.USER, "hi", timestamp=datetime(2026, 1, 1, 10, 0)))
-        assert datetime.fromisoformat(msg.timestamp).tzinfo is not None
-
     def test_conversation_from_api(self):
         data = _conv_data(messages=[
             ConversationMessage("user", "Hola", "2026-01-01T10:00:00Z"),
@@ -72,69 +61,15 @@ class TestConversions:
         conv = conversation_from_api(data)
         assert conv.id == SERVER_ID
         assert conv.title == "Hola"
+        assert conv.stored is True
         assert [m.role for m in conv.messages] == [Role.USER, Role.ASSISTANT]
         # Converted to naive local time, like the datetimes created by the app
         assert conv.created_at.tzinfo is None
         expected = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
         assert conv.created_at == expected
 
-    def test_round_trip_keeps_the_instant(self):
-        original = Message(Role.USER, "hi", timestamp=datetime(2026, 5, 4, 12, 30))
-        sent = message_to_api(original)
-        back = conversation_from_api(_conv_data(messages=[sent])).messages[0]
-        assert back.timestamp == original.timestamp
-
-
-class TestSave:
-    def test_first_save_creates_conversation_and_takes_server_id(self, store, api_client):
-        conv = _chat("Hola, ¿qué tal?", "Bien")
-
-        store.save_conversation(conv)
-
-        api_client.create_conversation.assert_called_once()
-        title, messages = api_client.create_conversation.call_args.args
-        assert title == "Hola, ¿qué tal?"
-        assert [m.role for m in messages] == ["user", "assistant"]
-        assert conv.id == SERVER_ID
-
-    def test_next_saves_only_append_new_messages(self, store, api_client):
-        conv = _chat("Hola", "Bien")
-        store.save_conversation(conv)
-
-        conv.add_message(Role.USER, "Otra")
-        conv.add_message(Role.ASSISTANT, "Respuesta")
-        store.save_conversation(conv)
-
-        api_client.create_conversation.assert_called_once()
-        conv_id, messages = api_client.append_messages.call_args.args
-        assert conv_id == SERVER_ID
-        assert [m.content for m in messages] == ["Otra", "Respuesta"]
-
-    def test_save_without_changes_does_nothing(self, store, api_client):
-        conv = _chat("Hola", "Bien")
-        store.save_conversation(conv)
-        store.save_conversation(conv)
-        api_client.append_messages.assert_not_called()
-
-    def test_failed_append_is_retried_on_next_save(self, store, api_client):
-        conv = _chat("Hola", "Bien")
-        store.save_conversation(conv)
-
-        conv.add_message(Role.USER, "Otra")
-        api_client.append_messages.side_effect = requests.ConnectionError("down")
-        store.save_conversation(conv)  # must not raise
-
-        api_client.append_messages.side_effect = None
-        conv.add_message(Role.ASSISTANT, "Respuesta")
-        store.save_conversation(conv)
-        _, messages = api_client.append_messages.call_args.args
-        assert [m.content for m in messages] == ["Otra", "Respuesta"]
-
-    def test_api_error_on_create_does_not_raise(self, store, api_client):
-        api_client.create_conversation.side_effect = SenecaServerError("boom", status_code=500)
-        conv = _chat("Hola")
-        store.save_conversation(conv)
-        assert conv.id != SERVER_ID
+    def test_new_local_conversation_is_not_stored(self):
+        assert Conversation().stored is False
 
 
 class TestLoad:
@@ -143,6 +78,7 @@ class TestLoad:
         result = store.load_conversations(20)
         assert [c.id for c in result] == [SERVER_ID]
         assert result[0].messages == []
+        assert result[0].stored is True
         api_client.list_conversations.assert_called_once_with(per_page=20)
 
     def test_load_limit_is_clamped_to_api_maximum(self, store, api_client):
@@ -167,33 +103,33 @@ class TestLoad:
         api_client.get_conversation.assert_called_once_with(SERVER_ID)
         assert [m.content for m in conv.messages] == ["Hola"]
 
-    def test_continue_loaded_conversation_appends(self, store, api_client):
+    def test_ensure_messages_ignores_new_local_conversations(self, store, api_client):
+        store.ensure_messages(_local_chat("Hola"))
+        api_client.get_conversation.assert_not_called()
+
+    def test_ensure_messages_when_api_is_down_does_not_raise(self, store, api_client):
         api_client.list_conversations.return_value = [_conv_data()]
-        api_client.get_conversation.return_value = _conv_data(messages=[
-            ConversationMessage("user", "Hola", "2026-01-01T10:00:00Z"),
-        ])
+        api_client.get_conversation.side_effect = SenecaServerError("boom", status_code=500)
         conv = store.load_conversations()[0]
         store.ensure_messages(conv)
-
-        conv.add_message(Role.ASSISTANT, "¡Hola!")
-        store.save_conversation(conv)
-
-        api_client.create_conversation.assert_not_called()
-        _, messages = api_client.append_messages.call_args.args
-        assert [m.content for m in messages] == ["¡Hola!"]
-
-    def test_ensure_messages_ignores_new_local_conversations(self, store, api_client):
-        store.ensure_messages(_chat("Hola"))
-        api_client.get_conversation.assert_not_called()
+        assert conv.messages == []
 
 
 class TestDelete:
     def test_delete_stored_conversation(self, store, api_client):
-        conv = _chat("Hola")
-        store.save_conversation(conv)
+        api_client.list_conversations.return_value = [_conv_data()]
+        conv = store.load_conversations()[0]
         store.delete_conversation(conv)
         api_client.delete_conversation.assert_called_once_with(SERVER_ID)
+        assert conv.stored is False
 
     def test_delete_unsaved_conversation_is_noop(self, store, api_client):
-        store.delete_conversation(_chat("Hola"))
+        store.delete_conversation(_local_chat("Hola"))
         api_client.delete_conversation.assert_not_called()
+
+    def test_delete_error_does_not_raise(self, store, api_client):
+        api_client.list_conversations.return_value = [_conv_data()]
+        api_client.delete_conversation.side_effect = requests.ConnectionError("down")
+        conv = store.load_conversations()[0]
+        store.delete_conversation(conv)
+        assert conv.stored is True

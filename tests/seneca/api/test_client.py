@@ -104,9 +104,10 @@ class TestContextManager:
     def test_enter_returns_self(self, client):
         assert client.__enter__() is client
 
-    def test_exit_closes_session(self, client, mock_session):
+    def test_exit_closes_sessions(self, client, mock_session):
         client.__exit__(None, None, None)
-        mock_session.close.assert_called_once()
+        # The regular and the chat-streaming sessions share the same mock
+        assert mock_session.close.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -769,3 +770,89 @@ class TestConversations:
         mock_session.delete.return_value = _error(400, "Invalid conversation ID format.")
         with pytest.raises(SenecaBadRequestError):
             client.delete_conversation("bad")
+
+
+# ---------------------------------------------------------------------------
+# Chat
+# ---------------------------------------------------------------------------
+
+
+def _sse_response(lines, status_code=200):
+    """Mocked streaming response whose iter_lines() yields *lines*."""
+    response = MagicMock()
+    response.ok = status_code < 400
+    response.status_code = status_code
+    response.iter_lines.return_value = iter(lines)
+    return response
+
+
+class TestChat:
+    def test_capabilities(self, client, mock_session):
+        mock_session.get.return_value = TestRaiseForStatus._make_response(
+            200, {"provider": "ollama", "model": "llama3.2", "tool_calling": True})
+        caps = client.get_chat_capabilities()
+        assert (caps.provider, caps.model, caps.tool_calling) == ("ollama", "llama3.2", True)
+        assert mock_session.get.call_args.args[0] == "http://localhost:1414/senecaai/v1/chat/capabilities"
+
+    def test_stream_chat_sends_body_and_parses_events(self, client, mock_session):
+        mock_session.post.return_value = _sse_response([
+            "event: conversation", 'data: {"id": "c1", "title": "Hola", "created": true}', "",
+            ": keep-alive", "",
+            "event: token", 'data: {"text": "Ho"}', "",
+            "event: token", 'data: {"text": "la"}', "",
+            "event: done", 'data: {"message": null}', "",
+        ])
+        tools = [{"name": "t", "description": "", "parameters": {"type": "object", "properties": {}}}]
+
+        events = list(client.stream_chat(content="Hola", tools=tools))
+
+        assert [e.event for e in events] == ["conversation", "token", "token", "done"]
+        assert events[0].data["id"] == "c1"
+        kwargs = mock_session.post.call_args.kwargs
+        assert mock_session.post.call_args.args[0] == "http://localhost:1414/senecaai/v1/chat"
+        assert kwargs["json"] == {"content": "Hola", "tools": tools}
+        assert kwargs["stream"] is True
+        assert kwargs["headers"]["Accept"] == "text/event-stream"
+        assert kwargs["timeout"] == (10.0, 300.0)
+        mock_session.post.return_value.close.assert_called()
+
+    def test_stream_chat_tool_results_body(self, client, mock_session):
+        mock_session.post.return_value = _sse_response([])
+        results = [{"tool_call_id": "c", "content": "ok"}]
+        list(client.stream_chat(conversation_id="conv", tool_results=results))
+        assert mock_session.post.call_args.kwargs["json"] == {"conversation_id": "conv", "tool_results": results}
+
+    def test_stream_chat_http_error_raises_before_streaming(self, client, mock_session):
+        response = TestRaiseForStatus._make_response(404, {"error": "Conversation not found."})
+        response.ok = False
+        mock_session.post.return_value = response
+        with pytest.raises(SenecaNotFoundError, match="Conversation not found."):
+            client.stream_chat(content="Hola", conversation_id="nope")
+        response.close.assert_called()
+
+    def test_closed_stream_stops_silently(self, client, mock_session):
+        def lines():
+            yield "event: token"
+            yield 'data: {"text": "a"}'
+            yield ""
+            raise ConnectionError("connection closed")  # what a close() from another thread causes
+
+        mock_session.post.return_value = _sse_response(lines())
+        stream = client.stream_chat(content="Hola")
+        received = []
+        for event in stream:
+            received.append(event)
+            stream.close()
+        assert [e.event for e in received] == ["token"]
+        assert stream.closed
+
+    def test_read_error_while_open_is_raised(self, client, mock_session):
+        import requests
+
+        def lines():
+            yield "event: token"
+            raise requests.ConnectionError("server died")
+
+        mock_session.post.return_value = _sse_response(lines())
+        with pytest.raises(requests.ConnectionError):
+            list(client.stream_chat(content="Hola"))

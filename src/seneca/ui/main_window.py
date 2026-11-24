@@ -44,7 +44,7 @@ from config.settings import (
 )
 from seneca.core.agent import SenecaAgent
 from seneca.core.conversation import Conversation, Role
-from seneca.core.storage import create_conversation_store
+from seneca.core.api_storage import ApiConversationStore
 from seneca.i18n.locale import I18n
 from seneca.ui.chat_area import ChatArea
 from seneca.ui.input_bar import InputBar
@@ -76,11 +76,14 @@ class MainWindow(ctk.CTk):
         self._i18n = I18n(config.app_locale)
         self._agent = SenecaAgent()
         self._active_conversation: Conversation = Conversation()
-        self._store = create_conversation_store()
+        self._store = ApiConversationStore.from_config()
         self._history: list[Conversation] = self._store.load_conversations(
             config.max_conversations
         )
         self._current_bubble: ChatArea.AssistantBubble | None | object = None  # AssistantBubble | None | _BUBBLE_PENDING
+        # Incremented whenever a reply starts or the chat is switched, so the
+        # callbacks of an older (cancelled) reply no longer touch the UI
+        self._turn = 0
         
         # Initialize SpeechToTextService
         self._stt_service = SpeechToTextService(
@@ -233,6 +236,7 @@ class MainWindow(ctk.CTk):
 
     def _on_new_conversation(self) -> None:
         """Reset the UI and create a blank conversation."""
+        self._turn += 1
         self._agent.cancel()
         self._agent.reset()
         self._active_conversation = Conversation()
@@ -245,6 +249,7 @@ class MainWindow(ctk.CTk):
 
     def _on_load_conversation(self, conv: Conversation) -> None:
         """Replay a historical conversation in the chat area."""
+        self._turn += 1
         self._agent.cancel()
         self._agent.reset()
         self._store.ensure_messages(conv)  # history items may only hold a summary
@@ -279,12 +284,14 @@ class MainWindow(ctk.CTk):
         self._input.set_thinking(True)
         self._current_bubble = _BUBBLE_PENDING # Indicate bubble creation is pending
 
-        # Stream agent reply
+        # Stream the reply; the API server calls the LLM and stores both messages
+        self._turn += 1
+        turn, conv = self._turn, self._active_conversation
         self._agent.stream_reply(
-            conversation=self._active_conversation,
-            on_token=self._on_token,
-            on_done=self._on_done,
-            on_error=self._on_error,
+            conversation=conv,
+            on_token=lambda token: self._on_token(turn, token),
+            on_done=lambda reply: self._on_done(turn, conv, reply),
+            on_error=lambda message: self._on_error(turn, message),
         )
 
     def _on_cancel(self) -> None:
@@ -302,13 +309,15 @@ class MainWindow(ctk.CTk):
         """Called when a tool is removed from the input bar."""
         self._agent.remove_tool(tool_func)
 
-    def _on_token(self, token: str) -> None:
+    def _on_token(self, turn: int, token: str) -> None:
         """Deliver a streamed token to the UI (called from worker thread)."""
         # Delegate all logic to the main thread to prevent multiple bubble creation
-        self.after(0, self._process_token_main_thread, token)
+        self.after(0, self._process_token_main_thread, turn, token)
 
-    def _process_token_main_thread(self, token: str) -> None:
+    def _process_token_main_thread(self, turn: int, token: str) -> None:
         """Handles bubble creation and token appending sequentially on the main thread."""
+        if turn != self._turn:
+            return  # token of a reply the user has left
         if self._current_bubble is _BUBBLE_PENDING:
             self._chat.hide_thinking_message()
             self._current_bubble = self._chat.add_assistant_bubble()
@@ -319,24 +328,33 @@ class MainWindow(ctk.CTk):
             self.update()
             self._chat.scroll_to_bottom()
 
-    def _on_done(self, full_reply: str) -> None:
-        """Finalise a completed reply."""
-        self._active_conversation.add_message(Role.ASSISTANT, full_reply)
-        self._store.save_conversation(self._active_conversation)
+    def _on_done(self, turn: int, conv: Conversation, full_reply: str) -> None:
+        """Finalise a completed (or cancelled) reply; the server has already stored it."""
+        self.after(0, self._finish_reply_main_thread, turn, conv, full_reply)
 
-        # Update history list
-        if self._active_conversation not in self._history:
-            self._history.insert(0, self._active_conversation)
+    def _finish_reply_main_thread(self, turn: int, conv: Conversation, full_reply: str) -> None:
+        # A cancelled reply keeps the text already shown, as the server does
+        if full_reply:
+            conv.add_message(Role.ASSISTANT, full_reply)
+
+        # Update history list (the server created the conversation with the first message)
+        if conv.stored and conv not in self._history:
+            self._history.insert(0, conv)
             self._history = self._history[: config.max_conversations]
 
-        self.after(0, self._finish_thinking)
+        if turn == self._turn:
+            self._finish_thinking()
+        else:
+            self._refresh_sidebar_history()
 
-    def _on_error(self, message: str) -> None:
+    def _on_error(self, turn: int, message: str) -> None:
         """Display an error in the current bubble."""
-        self.after(0, self._handle_error_main_thread, message)
+        self.after(0, self._handle_error_main_thread, turn, message)
 
-    def _handle_error_main_thread(self, message: str) -> None:
+    def _handle_error_main_thread(self, turn: int, message: str) -> None:
         """Handles error display sequentially on the main thread."""
+        if turn != self._turn:
+            return  # error of a reply the user has left
         self._chat.hide_thinking_message()
         
         if self._current_bubble is _BUBBLE_PENDING:

@@ -234,6 +234,365 @@
 			]
 		},
 		{
+			"name": "Chat",
+			"description": "The API calls the LLM (LLM_PROVIDER of the api container) and streams the reply as Server-Sent Events. See docs/chat-api.md.",
+			"item": [
+				{
+					"name": "chat capabilities",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-SENECA-AI-API-KEY",
+								"value": "{{X-SENECA-AI-API-KEY}}",
+								"type": "text"
+							},
+							{
+								"key": "X-SENECA-AI-USER-ID",
+								"value": "{{USER_ID}}",
+								"type": "text",
+								"description": "Optional: user on whose behalf the API key acts. Without it: api_key_user"
+							}
+						],
+						"url": {
+							"raw": "{{HOST}}/senecaai/v1/chat/capabilities",
+							"host": [
+								"{{HOST}}"
+							],
+							"path": [
+								"senecaai",
+								"v1",
+								"chat",
+								"capabilities"
+							]
+						},
+						"description": "Provider, model and whether the model supports tool calling."
+					},
+					"response": [],
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('200 OK', () => pm.response.to.have.status(200));",
+									"pm.test('has tool_calling', () => pm.expect(pm.response.json()).to.have.property('tool_calling'));"
+								]
+							}
+						}
+					]
+				},
+				{
+					"name": "chat (new conversation)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('200 OK', () => pm.response.to.have.status(200));",
+									"// The body is a stream of Server-Sent Events: 'event: <name>' + 'data: <json>'",
+									"const events = pm.response.text().trim().split('\\n\\n').map(block => {",
+									"    const lines = block.split('\\n');",
+									"    const name = (lines.find(l => l.startsWith('event:')) || '').slice(6).trim();",
+									"    const data = (lines.find(l => l.startsWith('data:')) || 'data: {}').slice(5).trim();",
+									"    return { event: name, data: JSON.parse(data) };",
+									"});",
+									"pm.test('first event is conversation', () => pm.expect(events[0].event).to.eql('conversation'));",
+									"pm.collectionVariables.set('CONVERSATION_ID', events[0].data.id);",
+									"const last = events[events.length - 1];",
+									"pm.test('ends with done or tool_calls', () => pm.expect(['done', 'tool_calls']).to.include(last.event));",
+									"if (last.event === 'tool_calls') {",
+									"    pm.collectionVariables.set('TOOL_CALL_ID', last.data.tool_calls[0].id);",
+									"}",
+									"console.log(events.filter(e => e.event === 'token').map(e => e.data.text).join(''));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-SENECA-AI-API-KEY",
+								"value": "{{X-SENECA-AI-API-KEY}}",
+								"type": "text"
+							},
+							{
+								"key": "X-SENECA-AI-USER-ID",
+								"value": "{{USER_ID}}",
+								"type": "text",
+								"description": "Optional: user on whose behalf the API key acts. Without it: api_key_user"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"content\": \"Hola Séneca, ¿qué es el estoicismo? Responde en una frase.\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}/senecaai/v1/chat",
+							"host": [
+								"{{HOST}}"
+							],
+							"path": [
+								"senecaai",
+								"v1",
+								"chat"
+							]
+						},
+						"description": "Creates a conversation with the message and streams the reply. Saves the new conversation id in CONVERSATION_ID (see the Tests tab; the reply text is printed in the Postman console)."
+					},
+					"response": []
+				},
+				{
+					"name": "chat (continue conversation)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('200 OK', () => pm.response.to.have.status(200));",
+									"// The body is a stream of Server-Sent Events: 'event: <name>' + 'data: <json>'",
+									"const events = pm.response.text().trim().split('\\n\\n').map(block => {",
+									"    const lines = block.split('\\n');",
+									"    const name = (lines.find(l => l.startsWith('event:')) || '').slice(6).trim();",
+									"    const data = (lines.find(l => l.startsWith('data:')) || 'data: {}').slice(5).trim();",
+									"    return { event: name, data: JSON.parse(data) };",
+									"});",
+									"pm.test('first event is conversation', () => pm.expect(events[0].event).to.eql('conversation'));",
+									"pm.collectionVariables.set('CONVERSATION_ID', events[0].data.id);",
+									"const last = events[events.length - 1];",
+									"pm.test('ends with done or tool_calls', () => pm.expect(['done', 'tool_calls']).to.include(last.event));",
+									"if (last.event === 'tool_calls') {",
+									"    pm.collectionVariables.set('TOOL_CALL_ID', last.data.tool_calls[0].id);",
+									"}",
+									"console.log(events.filter(e => e.event === 'token').map(e => e.data.text).join(''));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-SENECA-AI-API-KEY",
+								"value": "{{X-SENECA-AI-API-KEY}}",
+								"type": "text"
+							},
+							{
+								"key": "X-SENECA-AI-USER-ID",
+								"value": "{{USER_ID}}",
+								"type": "text",
+								"description": "Optional: user on whose behalf the API key acts. Without it: api_key_user"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversation_id\": \"{{CONVERSATION_ID}}\",\n  \"content\": \"¿Y quién lo fundó?\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}/senecaai/v1/chat",
+							"host": [
+								"{{HOST}}"
+							],
+							"path": [
+								"senecaai",
+								"v1",
+								"chat"
+							]
+						},
+						"description": "Adds a message to the conversation in CONVERSATION_ID; the model receives the stored history."
+					},
+					"response": []
+				},
+				{
+					"name": "chat (with tools)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('200 OK', () => pm.response.to.have.status(200));",
+									"// The body is a stream of Server-Sent Events: 'event: <name>' + 'data: <json>'",
+									"const events = pm.response.text().trim().split('\\n\\n').map(block => {",
+									"    const lines = block.split('\\n');",
+									"    const name = (lines.find(l => l.startsWith('event:')) || '').slice(6).trim();",
+									"    const data = (lines.find(l => l.startsWith('data:')) || 'data: {}').slice(5).trim();",
+									"    return { event: name, data: JSON.parse(data) };",
+									"});",
+									"pm.test('first event is conversation', () => pm.expect(events[0].event).to.eql('conversation'));",
+									"pm.collectionVariables.set('CONVERSATION_ID', events[0].data.id);",
+									"const last = events[events.length - 1];",
+									"pm.test('ends with done or tool_calls', () => pm.expect(['done', 'tool_calls']).to.include(last.event));",
+									"if (last.event === 'tool_calls') {",
+									"    pm.collectionVariables.set('TOOL_CALL_ID', last.data.tool_calls[0].id);",
+									"}",
+									"console.log(events.filter(e => e.event === 'token').map(e => e.data.text).join(''));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-SENECA-AI-API-KEY",
+								"value": "{{X-SENECA-AI-API-KEY}}",
+								"type": "text"
+							},
+							{
+								"key": "X-SENECA-AI-USER-ID",
+								"value": "{{USER_ID}}",
+								"type": "text",
+								"description": "Optional: user on whose behalf the API key acts. Without it: api_key_user"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"content\": \"Usa la herramienta count_words para contar las palabras de: 'el sol sale por el este'.\",\n  \"tools\": [\n    {\n      \"name\": \"count_words\",\n      \"description\": \"Count the words of a text. Use it whenever the user asks how many words a text has.\",\n      \"parameters\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"text\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"text\"\n        ]\n      }\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}/senecaai/v1/chat",
+							"host": [
+								"{{HOST}}"
+							],
+							"path": [
+								"senecaai",
+								"v1",
+								"chat"
+							]
+						},
+						"description": "Offers a client-side tool. If the model calls it, the stream ends with a tool_calls event and its id is saved in TOOL_CALL_ID; send the result with 'chat (tool results)'."
+					},
+					"response": []
+				},
+				{
+					"name": "chat (tool results)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"type": "text/javascript",
+								"exec": [
+									"pm.test('200 OK', () => pm.response.to.have.status(200));",
+									"// The body is a stream of Server-Sent Events: 'event: <name>' + 'data: <json>'",
+									"const events = pm.response.text().trim().split('\\n\\n').map(block => {",
+									"    const lines = block.split('\\n');",
+									"    const name = (lines.find(l => l.startsWith('event:')) || '').slice(6).trim();",
+									"    const data = (lines.find(l => l.startsWith('data:')) || 'data: {}').slice(5).trim();",
+									"    return { event: name, data: JSON.parse(data) };",
+									"});",
+									"pm.test('first event is conversation', () => pm.expect(events[0].event).to.eql('conversation'));",
+									"pm.collectionVariables.set('CONVERSATION_ID', events[0].data.id);",
+									"const last = events[events.length - 1];",
+									"pm.test('ends with done or tool_calls', () => pm.expect(['done', 'tool_calls']).to.include(last.event));",
+									"if (last.event === 'tool_calls') {",
+									"    pm.collectionVariables.set('TOOL_CALL_ID', last.data.tool_calls[0].id);",
+									"}",
+									"console.log(events.filter(e => e.event === 'token').map(e => e.data.text).join(''));"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-SENECA-AI-API-KEY",
+								"value": "{{X-SENECA-AI-API-KEY}}",
+								"type": "text"
+							},
+							{
+								"key": "X-SENECA-AI-USER-ID",
+								"value": "{{USER_ID}}",
+								"type": "text",
+								"description": "Optional: user on whose behalf the API key acts. Without it: api_key_user"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "text/event-stream",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"conversation_id\": \"{{CONVERSATION_ID}}\",\n  \"tool_results\": [\n    {\n      \"tool_call_id\": \"{{TOOL_CALL_ID}}\",\n      \"content\": \"6\"\n    }\n  ],\n  \"tools\": [\n    {\n      \"name\": \"count_words\",\n      \"description\": \"Count the words of a text. Use it whenever the user asks how many words a text has.\",\n      \"parameters\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"text\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"text\"\n        ]\n      }\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{HOST}}/senecaai/v1/chat",
+							"host": [
+								"{{HOST}}"
+							],
+							"path": [
+								"senecaai",
+								"v1",
+								"chat"
+							]
+						},
+						"description": "Sends the result of the tool call saved in TOOL_CALL_ID and resumes the reply. Returns 409 if no tool call is waiting."
+					},
+					"response": []
+				}
+			]
+		},
+		{
 			"name": "Conversations",
 			"description": "Authenticated with the API key + X-SENECA-AI-USER-ID header. To use a JWT instead, replace both headers with `Authorization: Bearer {{ACCESS_TOKEN}}` (see *list conversations (JWT)*).",
 			"item": [
@@ -586,6 +945,10 @@
 		},
 		{
 			"key": "CONVERSATION_ID",
+			"value": ""
+		},
+		{
+			"key": "TOOL_CALL_ID",
 			"value": ""
 		}
 	]

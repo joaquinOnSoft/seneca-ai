@@ -14,7 +14,7 @@ import whisper
 from bson.objectid import ObjectId
 from faster_whisper import WhisperModel
 from flasgger import Swagger
-from flask import Flask, request, jsonify, g, has_app_context, Response
+from flask import Flask, request, jsonify, g, has_app_context, Response, stream_with_context
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from passlib.hash import bcrypt
@@ -22,6 +22,7 @@ from pymongo.errors import PyMongoError
 from pythonjsonlogger.json import JsonFormatter
 from werkzeug.exceptions import HTTPException
 
+from seneca.api.chat import ChatRequestError, ChatService, build_llm, model_name, parse_chat_request
 from seneca.api.database import MongoDatabase
 from seneca.utils.config import config
 
@@ -61,6 +62,9 @@ class ForbiddenError(ApiException):
 
 class NotFoundError(ApiException):
     status_code = HTTPStatus.NOT_FOUND
+
+class ConflictError(ApiException):
+    status_code = HTTPStatus.CONFLICT
 
 class ServiceUnavailableError(ApiException):
     status_code = HTTPStatus.SERVICE_UNAVAILABLE
@@ -154,6 +158,16 @@ def init_mongodb():
 def setup_mongodb():
     init_mongodb()
 
+# --- Chat (LLM) ---
+# The LLM is created per turn, so a missing provider key only fails the chat requests
+chat_service = ChatService(
+    db_client,
+    llm_factory=lambda: build_llm(config),
+    max_history_messages=config.chat_history_max_messages,
+    provider=config.llm_provider,
+    model=model_name(config),
+)
+
 # --- Custom JSON Encoder for MongoDB ObjectId and datetime ---
 class MongoJsonEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -225,8 +239,14 @@ def _raise_forbidden_or_not_found(_id, forbidden_message):
     raise NotFoundError("Conversation not found.")
 
 
+def _public_conversation(conversation):
+    """Drop the internal chat state (pending tool calls) from a conversation document."""
+    return {k: v for k, v in conversation.items() if k != "pending_turn"}
+
+
 def _conversation_response(conversation, status=HTTPStatus.OK, headers=None):
-    response = Response(json.dumps(_prepare_response_data(conversation), cls=MongoJsonEncoder),
+    response = Response(json.dumps(_prepare_response_data(_public_conversation(conversation)),
+                                   cls=MongoJsonEncoder),
                         mimetype='application/json')
     return response, status, headers or {}
 
@@ -359,6 +379,46 @@ swagger_config = {
                 }
             },
             "required": ["messages"]
+        },
+        "ChatToolSchema": {
+            "type": "object",
+            "description": "A tool executed by the client (OpenAI function format)",
+            "properties": {
+                "name": {"type": "string", "description": "1-64 letters, digits, '_' or '-'"},
+                "description": {"type": "string"},
+                "parameters": {"type": "object", "description": "JSON schema of the arguments (type: object)"}
+            },
+            "required": ["name"]
+        },
+        "ChatToolResultSchema": {
+            "type": "object",
+            "properties": {
+                "tool_call_id": {"type": "string", "description": "id received in the tool_calls event"},
+                "content": {"type": "string", "description": "Result of the tool (or an error message)"}
+            },
+            "required": ["tool_call_id", "content"]
+        },
+        "ChatRequestSchema": {
+            "type": "object",
+            "description": "Send either 'content' (new user message) or 'tool_results' (resume the turn)",
+            "properties": {
+                "conversation_id": {"type": "string",
+                                    "description": "Existing conversation; omit to create a new one"},
+                "content": {"type": "string", "description": "The user's message"},
+                "tools": {"type": "array", "items": {"$ref": "#/definitions/ChatToolSchema"},
+                          "description": "Tools the model may call (executed by the client)"},
+                "tool_results": {"type": "array", "items": {"$ref": "#/definitions/ChatToolResultSchema"},
+                                 "description": "Results of every tool call of the last tool_calls event"}
+            }
+        },
+        "ChatCapabilitiesSchema": {
+            "type": "object",
+            "properties": {
+                "provider": {"type": "string", "enum": ["ollama", "openai", "anthropic"]},
+                "model": {"type": "string"},
+                "tool_calling": {"type": "boolean"}
+            },
+            "required": ["provider", "model", "tool_calling"]
         },
         "AuthLoginSchema": {
             "type": "object",
@@ -928,6 +988,7 @@ def get_conversations():
                                                 include_messages=include_messages)
 
     api.logger.info(f"Found {len(conversations)} conversations for user {g.user_id} on page {num_page}.")
+    conversations = [_public_conversation(c) for c in conversations]
     return Response(json.dumps(_prepare_response_data(conversations), cls=MongoJsonEncoder),
                     mimetype='application/json'), HTTPStatus.OK
 
@@ -1210,6 +1271,110 @@ def delete_conversation(_id):
     return Response(status=HTTPStatus.NO_CONTENT)
 
 
+# --- Chat Endpoints ---
+@api.route('/senecaai/v1/chat/capabilities', methods=['GET'])
+def get_chat_capabilities():
+    """
+    Chat Capabilities
+    Returns the LLM provider and model used by the chat, and whether the model supports tool calling
+    (clients only offer tools when it does).
+    ---
+    security:
+      - BearerAuth: []
+      - APIKeyHeader: []
+    responses:
+      200:
+        description: "Capabilities of the configured LLM."
+        schema:
+          $ref: '#/definitions/ChatCapabilitiesSchema'
+      401:
+        description: "Unauthorized: API Key or JWT missing or invalid."
+    """
+    return jsonify(chat_service.capabilities()), HTTPStatus.OK
+
+
+@api.route('/senecaai/v1/chat', methods=['POST'])
+def chat():
+    """
+    Chat (streamed reply)
+    Sends a user message and streams the assistant's reply as Server-Sent Events (text/event-stream).
+    The server stores both messages; without conversation_id a new conversation is created.
+
+    Events (each `data` is JSON):
+      - conversation: {"id", "title", "created"} (always first)
+      - token: {"text"}
+      - tool_calls: {"tool_calls": [{"id", "name", "args"}]}. The client runs the tools (they act on
+        the user's computer) and sends a new request with conversation_id and tool_results.
+      - done: {"message"} (the stored assistant message, or null if the reply was empty)
+      - error: {"error"}
+
+    Closing the connection cancels the reply; the text generated so far is stored.
+    See docs/chat-api.md.
+    ---
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          $ref: '#/definitions/ChatRequestSchema'
+    security:
+      - BearerAuth: []
+      - APIKeyHeader: []
+    produces:
+      - text/event-stream
+    responses:
+      200:
+        description: "Stream of Server-Sent Events with the reply."
+      400:
+        description: "Bad Request: Invalid body, conversation ID or tool results."
+      401:
+        description: "Unauthorized: API Key or JWT missing or invalid."
+      403:
+        description: "Forbidden: User does not have access to this conversation."
+      404:
+        description: "Not Found: Conversation with the given ID not found."
+      409:
+        description: "Conflict: tool_results sent but no tool calls are awaiting results."
+    """
+    _ensure_db_connected()
+    try:
+        chat_request = parse_chat_request(request.get_json(silent=True))
+    except ChatRequestError as e:
+        raise BadRequestError(str(e))
+
+    conversation = None
+    if chat_request.conversation_id:
+        _validate_conversation_id(chat_request.conversation_id)
+        conversation = db_client.get_conversation_by_id(chat_request.conversation_id, user_id=g.user_id)
+        if not conversation:
+            _raise_forbidden_or_not_found(chat_request.conversation_id,
+                                          "User does not have access to this conversation.")
+
+    state = None
+    created = False
+    if chat_request.tool_results is not None:
+        try:
+            state = chat_service.resume_state(conversation, chat_request.tool_results)
+        except LookupError as e:
+            raise ConflictError(str(e))
+        except ChatRequestError as e:
+            raise BadRequestError(str(e))
+        api.logger.info(f"Resuming chat turn in conversation {chat_request.conversation_id} "
+                        f"with {len(chat_request.tool_results)} tool results.")
+    else:
+        conversation, created = chat_service.start_turn(g.user_id, chat_request, conversation)
+        api.logger.info(f"Chat turn started in conversation {conversation['_id']} for user {g.user_id}.")
+
+    # waitress exposes a callable that tells whether the client has gone away
+    # (needs channel_request_lookahead > 0, see the serve() call below)
+    client_disconnected = request.environ.get("waitress.client_disconnected") or (lambda: False)
+
+    events = chat_service.stream_turn(conversation, g.user_id, created, chat_request.tools,
+                                      state=state, is_disconnected=client_disconnected)
+    return Response(stream_with_context(events), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 if __name__ == '__main__':
     from urllib.parse import urlparse
     from waitress import serve
@@ -1217,4 +1382,7 @@ if __name__ == '__main__':
     _parsed = urlparse(config.seneca_api_base_url)
     _host = _parsed.hostname or "0.0.0.0"
     _port = _parsed.port or 1414
-    serve(api, host="0.0.0.0", port=_port)
+    # threads: each streamed chat reply keeps a thread busy until it ends.
+    # channel_request_lookahead > 0 lets waitress notice a client that closes
+    # the connection mid-reply ("stop" button), so the LLM stops early.
+    serve(api, host="0.0.0.0", port=_port, threads=config.api_threads, channel_request_lookahead=5)
