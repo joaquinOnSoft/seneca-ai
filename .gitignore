@@ -5,8 +5,12 @@ volumes/
  
 # Local overrides (paths, ports, individual developer credentials)
 docker-compose.override.yaml
-# JWT signing secret, generated locally by the install/redeploy scripts
+# Docker secrets, generated locally by generate_secrets.sh / generate_secrets.ps1
+# (called by the install and redeploy scripts). Never commit them.
 docker/api/jwt_secret_key.txt
+docker/api/seneca_ai_api_key.txt
+docker/mongo/mongo_root_username.txt
+docker/mongo/mongo_root_password.txt
  
 # Local overrides (paths, ports, individual developer credentials)
 .dockerignore~
