@@ -63,8 +63,8 @@ services:
     restart: unless-stopped
 
     environment:
-      # Model the entrypoint will pull on first startup. OLLAMA_MODEL comes from
-      # .env or, if not there, from the environment (the shell wins if both set it)
+      # Model the entrypoint will pull on first startup. docker compose reads
+      # OLLAMA_MODEL from the shell environment first, then from .env
       OLLAMA_MODEL: "${OLLAMA_MODEL:-hadad/LFM2.5-1.2B:Q4_K_M}"
       # Seconds the model stays loaded in memory without requests
       OLLAMA_KEEP_ALIVE: "300"

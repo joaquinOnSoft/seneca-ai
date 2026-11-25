@@ -24,7 +24,7 @@ long conversations. See [memory.md](memory.md).
 | Variable                    | Default                    | Description                                         |
 |-----------------------------|----------------------------|-----------------------------------------------------|
 | `LLM_PROVIDER`              | `ollama`                   | `ollama`, `openai` or `anthropic`                   |
-| `OLLAMA_MODEL`              | `hadad/LFM2.5-1.2B:Q4_K_M` | Model served by the `ollama` container (from `.env`, else the environment) |
+| `OLLAMA_MODEL`              | `hadad/LFM2.5-1.2B:Q4_K_M` | Model served by the `ollama` container. An `OLLAMA_MODEL` exported in the shell that runs `docker compose` wins over `.env` |
 | `OPENAI_API_KEY` / `OPENAI_MODEL`       | – / `gpt-4o-mini` | Only with `LLM_PROVIDER=openai`             |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | – / `claude-3-haiku-20240307` | Only with `LLM_PROVIDER=anthropic` |
 | `CHAT_HISTORY_MAX_MESSAGES` | `50`                       | Most recent stored messages sent to the LLM         |

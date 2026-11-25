@@ -21,13 +21,32 @@
 # The chosen model is written to OLLAMA_MODEL in .env, which docker compose
 # reads. Order of precedence:
 #   1. OLLAMA_MODEL already set (non-empty) in .env   -> kept, no question asked
-#   2. OLLAMA_MODEL environment variable              -> kept, no question asked
+#   2. OLLAMA_MODEL environment variable              -> written to .env, no question asked
 #   3. otherwise the user picks a model and it is written to .env
+# Writing the environment value to .env keeps it when the installer runs
+# without that variable (e.g. `sudo` drops it, or docker compose runs later).
 # This script is sourced by install-ubuntu.sh, so it uses `return`, not `exit`.
 # ==============================================================================
 
 SELECT_ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
 SELECT_ENV_EXAMPLE="$(dirname "$SELECT_ENV_FILE")/.env.example"
+
+# Write OLLAMA_MODEL=$1 to .env (created from .env.example if missing)
+write_ollama_model_to_env() {
+    local model="$1" escaped
+    if [ ! -f "$SELECT_ENV_FILE" ] && [ -f "$SELECT_ENV_EXAMPLE" ]; then
+        cp "$SELECT_ENV_EXAMPLE" "$SELECT_ENV_FILE"
+        echo "Created $SELECT_ENV_FILE from .env.example"
+    fi
+    if grep -qE '^OLLAMA_MODEL=' "$SELECT_ENV_FILE" 2>/dev/null; then
+        # Escape the characters sed treats specially in the replacement
+        escaped=$(printf '%s' "$model" | sed -e 's/[\\|&]/\\&/g')
+        sed -i "s|^OLLAMA_MODEL=.*|OLLAMA_MODEL=${escaped}|" "$SELECT_ENV_FILE"
+    else
+        echo "OLLAMA_MODEL=${model}" >> "$SELECT_ENV_FILE"
+    fi
+    echo "Written to .env: OLLAMA_MODEL=${model}"
+}
 
 ENV_FILE_MODEL=""
 if [ -f "$SELECT_ENV_FILE" ]; then
@@ -39,6 +58,7 @@ if [ -n "$ENV_FILE_MODEL" ]; then
 fi
 if [ -n "${OLLAMA_MODEL:-}" ]; then
     echo "Ollama model taken from the environment: OLLAMA_MODEL=${OLLAMA_MODEL}"
+    write_ollama_model_to_env "$OLLAMA_MODEL"
     return 0 2>/dev/null || exit 0
 fi
 
@@ -134,15 +154,6 @@ else
     echo "Selected Recommended Model."
 fi
 
-# 7. Write it to .env (created from .env.example if missing)
-if [ ! -f "$SELECT_ENV_FILE" ] && [ -f "$SELECT_ENV_EXAMPLE" ]; then
-    cp "$SELECT_ENV_EXAMPLE" "$SELECT_ENV_FILE"
-    echo "Created $SELECT_ENV_FILE from .env.example"
-fi
-if grep -qE '^OLLAMA_MODEL=' "$SELECT_ENV_FILE" 2>/dev/null; then
-    sed -i "s|^OLLAMA_MODEL=.*|OLLAMA_MODEL=${SELECTED_MODEL}|" "$SELECT_ENV_FILE"
-else
-    echo "OLLAMA_MODEL=${SELECTED_MODEL}" >> "$SELECT_ENV_FILE"
-fi
-echo "Written to .env: OLLAMA_MODEL=${SELECTED_MODEL}"
+# 7. Write it to .env
+write_ollama_model_to_env "$SELECTED_MODEL"
 echo "=================================================="

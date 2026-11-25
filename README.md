@@ -136,6 +136,23 @@ The LLM is called by the **API server**, not by the desktop app: the
 | `ollama` (default) | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`      |
 | `anthropic`        | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` |
 
+The installer stores the Ollama model in `OLLAMA_MODEL` in `.env`, using
+`select_ollama_model.sh` (Linux) or `select_ollama_model.ps1` (Windows). It
+keeps a value already in `.env`, otherwise it writes the `OLLAMA_MODEL`
+environment variable. If neither is set, it suggests a model for the RAM tier
+of the computer and whether it has a GPU, and writes the chosen one:
+
+| Detected RAM | Tier  |
+|--------------|-------|
+| < 15 GB      | 8 GB  |
+| 15 - 30 GB   | 16 GB |
+| 31 - 62 GB   | 32 GB |
+| >= 63 GB     | 64 GB |
+
+Each tier starts 1 GB below its size, because the operating system reports a
+bit less RAM than the installed RAM. The models suggested for each tier are
+listed in [docs/containers.md](docs/containers.md#ollama-container).
+
 ### 4. Run
 
 ```bash

@@ -19,12 +19,32 @@
 # The chosen model is written to OLLAMA_MODEL in .env, which docker compose
 # reads. Order of precedence:
 #   1. OLLAMA_MODEL already set (non-empty) in .env   -> kept, no question asked
-#   2. OLLAMA_MODEL environment variable              -> kept, no question asked
+#   2. OLLAMA_MODEL environment variable              -> written to .env, no question asked
 #   3. otherwise the user picks a model and it is written to .env
+# The model is always stored in .env, so it survives the reboot between the
+# two installer executions (the second one starts the containers).
 # ==============================================================================
 
 $SelectEnvFile = Join-Path $PSScriptRoot ".env"
 $SelectEnvExample = Join-Path $PSScriptRoot ".env.example"
+
+# Write OLLAMA_MODEL=<Model> to .env (created from .env.example if missing)
+function Write-OllamaModelToEnv([string]$Model) {
+    if (-not (Test-Path $SelectEnvFile) -and (Test-Path $SelectEnvExample)) {
+        Copy-Item $SelectEnvExample $SelectEnvFile
+        Write-Host "Created $SelectEnvFile from .env.example"
+    }
+    $lines = @()
+    if (Test-Path $SelectEnvFile) { $lines = @(Get-Content $SelectEnvFile) }
+    $found = $false
+    $lines = @($lines | ForEach-Object {
+        if ($_ -match '^OLLAMA_MODEL=') { $found = $true; "OLLAMA_MODEL=$Model" } else { $_ }
+    })
+    if (-not $found) { $lines += "OLLAMA_MODEL=$Model" }
+    # UTF-8 without BOM
+    [System.IO.File]::WriteAllLines($SelectEnvFile, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Written to .env: OLLAMA_MODEL=$Model"
+}
 
 $EnvFileModel = ""
 if (Test-Path $SelectEnvFile) {
@@ -37,6 +57,7 @@ if ($EnvFileModel) {
 }
 if ($env:OLLAMA_MODEL) {
     Write-Host "Ollama model taken from the environment: OLLAMA_MODEL=$env:OLLAMA_MODEL"
+    Write-OllamaModelToEnv $env:OLLAMA_MODEL
     return
 }
 
@@ -137,20 +158,6 @@ if ($UserChoice -eq "A") {
     Write-Host "Selected Recommended Model."
 }
 
-# 7. Write it to .env (created from .env.example if missing). Stored in .env,
-#    so it survives the reboot between the two installer executions.
-if (-not (Test-Path $SelectEnvFile) -and (Test-Path $SelectEnvExample)) {
-    Copy-Item $SelectEnvExample $SelectEnvFile
-    Write-Host "Created $SelectEnvFile from .env.example"
-}
-$lines = @()
-if (Test-Path $SelectEnvFile) { $lines = @(Get-Content $SelectEnvFile) }
-$found = $false
-$lines = @($lines | ForEach-Object {
-    if ($_ -match '^OLLAMA_MODEL=') { $found = $true; "OLLAMA_MODEL=$SelectedModel" } else { $_ }
-})
-if (-not $found) { $lines += "OLLAMA_MODEL=$SelectedModel" }
-# UTF-8 without BOM
-[System.IO.File]::WriteAllLines($SelectEnvFile, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "Written to .env: OLLAMA_MODEL=$SelectedModel"
+# 7. Write it to .env
+Write-OllamaModelToEnv $SelectedModel
 Write-Host "=================================================="

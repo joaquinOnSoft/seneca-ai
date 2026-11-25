@@ -12,6 +12,36 @@ To install Seneca AI in Windows, follow these steps:
    .\install-win.ps1
    ```
    
+## AI model selection
+
+The installer first chooses the Ollama AI model (`select_ollama_model.ps1`). If `OLLAMA_MODEL`
+already has a value in `.env`, it is kept and nothing is asked. If it is set as
+an environment variable, it is written to `.env` and nothing is asked.
+Otherwise the installer detects the RAM and the GPU
+of the computer, suggests two models for its tier and writes the chosen one to
+`OLLAMA_MODEL` in `.env`:
+
+| Detected RAM | Tier  |
+|--------------|-------|
+| < 15 GB      | 8 GB  |
+| 15 - 30 GB   | 16 GB |
+| 31 - 62 GB   | 32 GB |
+| >= 63 GB     | 64 GB |
+
+Each tier starts 1 GB below its size, because the operating system reports a
+bit less RAM than the installed RAM (e.g. a 32 GB computer may report 31 GB).
+The models suggested for each tier are listed in
+[Docker containers](containers.md#ollama-container).
+
+> **Set the variable in the administrator terminal.** It is a new session, so
+> an `OLLAMA_MODEL` set in another window does not reach the installer. Set it
+> there, or in `.env`. The installer stores it in `.env`, so it survives the
+> reboot between its two executions:
+>
+> ```powershell
+> $env:OLLAMA_MODEL = "qwen2.5:3b"; .\install-win.ps1
+> ```
+
 ## Troubleshooting
 
 ### Power Shell scrips execution is not enabled
