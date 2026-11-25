@@ -4,16 +4,19 @@
 # Script to detect hardware (RAM & GPU) and select the optimal Ollama AI model
 # ==============================================================================
 #
-# |Ram	  | GPU	  | Modelo IA                   |
-# | ----- | ----- | --------------------------- |
-# | 8 Gb	| No	  | qwen2.5:1.5b o llama3.2:1b  |
-# | 8 Gb	| Yes	  | qwen2.5:3b o qwen2.5:1.5b   |
-# |16 Gb	| No	  | qwen2.5:3b o llama3.2:3b    |
-# |16 Gb	| Yes	  | mistral:7b o llama3:8b      |
-# |32 Gb	| No	  | llama3:8b o gemma2:9b       |
-# |32 Gb	| Yes	  | qwen2.5:14b o phi3:14b      |
-# |64 Gb	| No	  | llama3:8b o command-r:35b   |
-# |64 Gb	| Yes	  | mixtral:8x7b o llama3.1:70b |
+# | Detected RAM | Tier  | GPU | AI model                     |
+# | ------------ | ----- | --- | ---------------------------- |
+# | < 15 GB      | 8 GB  | No  | qwen2.5:1.5b or llama3.2:1b  |
+# | < 15 GB      | 8 GB  | Yes | qwen2.5:3b or qwen2.5:1.5b   |
+# | 15 - 30 GB   | 16 GB | No  | qwen2.5:3b or llama3.2:3b    |
+# | 15 - 30 GB   | 16 GB | Yes | mistral:7b or llama3:8b      |
+# | 31 - 62 GB   | 32 GB | No  | llama3:8b or gemma2:9b       |
+# | 31 - 62 GB   | 32 GB | Yes | qwen2.5:14b or phi3:14b      |
+# | >= 63 GB     | 64 GB | No  | llama3:8b or command-r:35b   |
+# | >= 63 GB     | 64 GB | Yes | mixtral:8x7b or llama3.1:70b |
+#
+# Each tier starts 1 GB below its size, because the OS reports a bit less RAM
+# than the installed RAM.
 #
 # The chosen model is written to OLLAMA_MODEL in .env, which docker compose
 # reads. Order of precedence:
@@ -43,12 +46,14 @@ fi
 TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 TOTAL_RAM_GB=$(( TOTAL_RAM_KB / 1000 / 1000 ))
 
-# Normalize RAM to match the table thresholds (8, 16, 32, 64)
-if [ "$TOTAL_RAM_GB" -ge 64 ]; then
+# Normalize RAM to the table tiers (8, 16, 32, 64). Each threshold is 1 GB
+# below its tier, because the reported RAM is a bit less than the installed RAM
+# (memory reserved by the firmware, integrated GPU, rounding).
+if [ "$TOTAL_RAM_GB" -ge 63 ]; then
     RAM_TIER=64
-elif [ "$TOTAL_RAM_GB" -ge 32 ]; then
+elif [ "$TOTAL_RAM_GB" -ge 31 ]; then
     RAM_TIER=32
-elif [ "$TOTAL_RAM_GB" -ge 16 ]; then
+elif [ "$TOTAL_RAM_GB" -ge 15 ]; then
     RAM_TIER=16
 else
     # Defaulting to 8GB tier as the minimum baseline
