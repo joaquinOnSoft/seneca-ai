@@ -370,6 +370,61 @@ class TestChatService:
         assert service.capabilities()["tool_calling"] is False
 
 
+class FakeMemory:
+    """MemoryService stand-in that records the searches."""
+
+    def __init__(self, block="MEMORIA: el usuario fue a Lisboa"):
+        self.block = block
+        self.searches = []
+
+    def context(self, user_id, query, exclude_conversation_id=None):
+        self.searches.append((user_id, query, exclude_conversation_id))
+        return self.block
+
+
+class TestChatServiceMemory:
+    def test_memory_is_added_to_the_system_prompt(self, db):
+        llm, memory = FakeLLM([text_round("Ok")]), FakeMemory()
+        service = ChatService(db, llm_factory=lambda: llm, memory=memory)
+        conversation, _ = service.start_turn(USER, parse_chat_request({"content": "¿Dónde fui?"}), None)
+        run(service, conversation)
+
+        system = llm.calls[0][0]
+        assert isinstance(system, SystemMessage)
+        assert system.content == SYSTEM_PROMPT + "\n\nMEMORIA: el usuario fue a Lisboa"
+        # Only one system message, at the start (Anthropic requires it)
+        assert sum(isinstance(m, SystemMessage) for m in llm.calls[0]) == 1
+        assert memory.searches == [(USER, "¿Dónde fui?", str(conversation["_id"]))]
+
+    def test_without_memory_results_the_prompt_is_unchanged(self, db):
+        llm = FakeLLM([text_round("Ok")])
+        service = ChatService(db, llm_factory=lambda: llm, memory=FakeMemory(block=""))
+        conversation, _ = service.start_turn(USER, parse_chat_request({"content": "Hola"}), None)
+        run(service, conversation)
+        assert llm.calls[0][0].content == SYSTEM_PROMPT
+
+    def test_summary_replaces_the_messages_that_do_not_fit(self, db):
+        stored = [user_msg(f"m{i}") for i in range(6)]
+        conv_id = db.add(USER, stored, memory={"summary": "Hablamos de Lisboa."})
+        llm = FakeLLM([text_round("Ok")])
+        service = ChatService(db, llm_factory=lambda: llm, max_history_messages=3)
+        conversation, _ = service.start_turn(USER, parse_chat_request({"content": "Sigue"}),
+                                             db.get_conversation_by_id(conv_id, USER))
+        run(service, conversation)
+
+        assert "Hablamos de Lisboa." in llm.calls[0][0].content
+        assert [m.content for m in llm.calls[0][1:]] == ["m4", "m5", "Sigue"]
+
+    def test_summary_is_not_used_when_the_whole_history_fits(self, db):
+        conv_id = db.add(USER, [user_msg("m0")], memory={"summary": "Hablamos de Lisboa."})
+        llm = FakeLLM([text_round("Ok")])
+        service = ChatService(db, llm_factory=lambda: llm, max_history_messages=50)
+        conversation, _ = service.start_turn(USER, parse_chat_request({"content": "Sigue"}),
+                                             db.get_conversation_by_id(conv_id, USER))
+        run(service, conversation)
+        assert llm.calls[0][0].content == SYSTEM_PROMPT
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -483,6 +538,23 @@ class TestChatEndpoint:
         response = client.get(f"/senecaai/v1/conversations/{conv_id}", headers=headers())
         assert response.status_code == 200
         assert "pending_turn" not in response.get_json()
+
+    def test_memory_state_is_not_exposed(self, client, chat_env):
+        db, _ = chat_env
+        conv_id = db.add(USER, [user_msg("Hola")], memory={"summary": "s", "indexed_turns": 1})
+        response = client.get(f"/senecaai/v1/conversations/{conv_id}", headers=headers())
+        assert response.status_code == 200
+        assert "memory" not in response.get_json()
+
+    def test_deleting_a_conversation_forgets_its_memory(self, client, chat_env):
+        db, _ = chat_env
+        conv_id = db.add(USER, [user_msg("Hola")])
+        db.delete_conversation = lambda _id, user_id: db.docs.pop(ObjectId(_id), None) is not None
+        memory = MagicMock()
+        with patch("seneca.api.api.memory_service", new=memory):
+            response = client.delete(f"/senecaai/v1/conversations/{conv_id}", headers=headers())
+        assert response.status_code == 204
+        memory.forget_conversation.assert_called_once_with(conv_id)
 
     def test_capabilities(self, client, chat_env):
         response = client.get(CAPABILITIES_URL, headers=headers())

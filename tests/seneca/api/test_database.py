@@ -121,7 +121,7 @@ def test_get_conversations(mock_db_instance, sample_conversation_data):
     assert len(conversations) == 1
     assert conversations[0]["_id"] == sample_conversation_data["_id"]
     mock_db_instance.conversations_collection.find.assert_called_once_with(
-        {"user_id": "test_user_1"}, {"messages": 0, "pending_turn": 0})
+        {"user_id": "test_user_1"}, {"messages": 0, "pending_turn": 0, "memory": 0})
 
 
 def test_get_conversation_by_id_with_user_id(mock_db_instance, sample_conversation_data):
@@ -243,9 +243,9 @@ def test_revoke_refresh_token_not_found(mock_db_instance, sample_user_data):
 # --- Tests for the conversation improvements (indexes, updated_at, append, delete) ---
 
 def test_connect_creates_conversation_indexes(mock_db_instance):
-    mock_db_instance.conversations_collection.create_index.assert_called_once_with(
-        [("user_id", 1), ("created_at", -1)], name="user_id_created_at"
-    )
+    create_index = mock_db_instance.conversations_collection.create_index
+    create_index.assert_any_call([("user_id", 1), ("created_at", -1)], name="user_id_created_at")
+    create_index.assert_any_call([("updated_at", 1)], name="updated_at")
 
 
 def test_connect_survives_index_creation_failure(mock_mongo_client):
@@ -265,13 +265,13 @@ def test_connect_twice_is_a_noop(mock_db_instance):
 def test_get_conversations_excludes_messages_by_default(mock_db_instance):
     mock_db_instance.get_conversations("test_user_1")
     mock_db_instance.conversations_collection.find.assert_called_once_with(
-        {"user_id": "test_user_1"}, {"messages": 0, "pending_turn": 0})
+        {"user_id": "test_user_1"}, {"messages": 0, "pending_turn": 0, "memory": 0})
 
 
 def test_get_conversations_including_messages(mock_db_instance):
     mock_db_instance.get_conversations("test_user_1", include_messages=True)
     mock_db_instance.conversations_collection.find.assert_called_once_with(
-        {"user_id": "test_user_1"}, {"pending_turn": 0})
+        {"user_id": "test_user_1"}, {"pending_turn": 0, "memory": 0})
 
 
 def test_create_conversation_sets_updated_at(mock_db_instance):
@@ -345,3 +345,48 @@ def test_connect_with_credentials(mock_mongo_client):
     db.connect()
     MockMongoClient.assert_called_once_with("mongodb://mongo:27017/senecaai", username="root",
                                             password="s3cr3t", authSource="admin")
+
+
+# --- Memory index state (seneca.memory) ---
+
+def test_update_conversation_messages_resets_memory(mock_db_instance, sample_conversation_data):
+    mock_db_instance.conversations_collection.update_one.return_value.matched_count = 1
+    mock_db_instance.update_conversation(str(sample_conversation_data["_id"]), "test_user_1", {"messages": []})
+    update = mock_db_instance.conversations_collection.update_one.call_args.args[1]
+    assert update["$unset"] == {"memory": ""}
+
+
+def test_update_conversation_title_keeps_memory(mock_db_instance, sample_conversation_data):
+    mock_db_instance.conversations_collection.update_one.return_value.matched_count = 1
+    mock_db_instance.update_conversation(str(sample_conversation_data["_id"]), "test_user_1", {"title": "t"})
+    update = mock_db_instance.conversations_collection.update_one.call_args.args[1]
+    assert "$unset" not in update
+
+
+def test_conversations_to_index_query(mock_db_instance):
+    mock_db_instance.conversations_to_index("seneca_turns_bge-m3_v1", limit=7)
+    query = mock_db_instance.conversations_collection.find.call_args.args[0]
+    assert query["pending_turn"] == {"$exists": False}
+    assert {"memory.collection": {"$ne": "seneca_turns_bge-m3_v1"}} in query["$or"]
+    mock_db_instance.conversations_collection.find.return_value.sort.return_value.limit.assert_called_once_with(7)
+
+
+def test_set_memory_state(mock_db_instance):
+    oid = ObjectId()
+    mock_db_instance.set_memory_state(str(oid), {"indexed_turns": 3})
+    mock_db_instance.conversations_collection.update_one.assert_called_once_with(
+        {"_id": oid}, {"$set": {"memory": {"indexed_turns": 3}}})
+
+
+def test_existing_conversation_ids_ignores_invalid_ids(mock_db_instance):
+    oid = ObjectId()
+    mock_db_instance.conversations_collection.find.return_value = [{"_id": oid}]
+    assert mock_db_instance.existing_conversation_ids([str(oid), "not-an-id"]) == {str(oid)}
+    query = mock_db_instance.conversations_collection.find.call_args.args[0]
+    assert query == {"_id": {"$in": [oid]}}
+
+
+def test_reset_memory_state(mock_db_instance):
+    mock_db_instance.conversations_collection.update_many.return_value.modified_count = 4
+    assert mock_db_instance.reset_memory_state() == 4
+    mock_db_instance.conversations_collection.update_many.assert_called_once_with({}, {"$unset": {"memory": ""}})

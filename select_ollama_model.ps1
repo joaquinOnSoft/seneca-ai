@@ -12,7 +12,30 @@
 # |32 Gb	| Yes	  | qwen2.5:14b o phi3:14b      |
 # |64 Gb	| No	  | llama3:8b o command-r:35b   |
 # |64 Gb	| Yes	  | mixtral:8x7b o llama3.1:70b |
+#
+# The chosen model is written to OLLAMA_MODEL in .env, which docker compose
+# reads. Order of precedence:
+#   1. OLLAMA_MODEL already set (non-empty) in .env   -> kept, no question asked
+#   2. OLLAMA_MODEL environment variable              -> kept, no question asked
+#   3. otherwise the user picks a model and it is written to .env
 # ==============================================================================
+
+$SelectEnvFile = Join-Path $PSScriptRoot ".env"
+$SelectEnvExample = Join-Path $PSScriptRoot ".env.example"
+
+$EnvFileModel = ""
+if (Test-Path $SelectEnvFile) {
+    $line = Get-Content $SelectEnvFile | Where-Object { $_ -match '^OLLAMA_MODEL=' } | Select-Object -Last 1
+    if ($line) { $EnvFileModel = ($line -replace '^OLLAMA_MODEL=', '').Trim().Trim('"').Trim("'") }
+}
+if ($EnvFileModel) {
+    Write-Host "Ollama model taken from .env: OLLAMA_MODEL=$EnvFileModel"
+    return
+}
+if ($env:OLLAMA_MODEL) {
+    Write-Host "Ollama model taken from the environment: OLLAMA_MODEL=$env:OLLAMA_MODEL"
+    return
+}
 
 # 1. Detect System RAM in Gigabytes
 $TotalRamByte = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
@@ -99,16 +122,30 @@ $UserChoice = Read-Host -Prompt $PromptMessage
 # Convert input to uppercase
 $UserChoice = $UserChoice.ToUpper()
 
-# 6. Assign the environment variable based on choice
+# 6. Pick the model based on choice
 if ($UserChoice -eq "A") {
-    $env:OLLAMA_AI_MODEL = $ModelAlt
+    $SelectedModel = $ModelAlt
     Write-Host "Selected Alternative Model."
 } else {
     # Defaults to Recommended if 'R', empty (ENTER), or any other key is pressed
-    $env:OLLAMA_AI_MODEL = $ModelRec
+    $SelectedModel = $ModelRec
     Write-Host "Selected Recommended Model."
 }
 
-# 7. Confirm the exported environment variable
-Write-Host "Environment variable set: OLLAMA_AI_MODEL=$env:OLLAMA_AI_MODEL"
+# 7. Write it to .env (created from .env.example if missing). Stored in .env,
+#    so it survives the reboot between the two installer executions.
+if (-not (Test-Path $SelectEnvFile) -and (Test-Path $SelectEnvExample)) {
+    Copy-Item $SelectEnvExample $SelectEnvFile
+    Write-Host "Created $SelectEnvFile from .env.example"
+}
+$lines = @()
+if (Test-Path $SelectEnvFile) { $lines = @(Get-Content $SelectEnvFile) }
+$found = $false
+$lines = @($lines | ForEach-Object {
+    if ($_ -match '^OLLAMA_MODEL=') { $found = $true; "OLLAMA_MODEL=$SelectedModel" } else { $_ }
+})
+if (-not $found) { $lines += "OLLAMA_MODEL=$SelectedModel" }
+# UTF-8 without BOM
+[System.IO.File]::WriteAllLines($SelectEnvFile, [string[]]$lines, (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "Written to .env: OLLAMA_MODEL=$SelectedModel"
 Write-Host "=================================================="

@@ -111,6 +111,13 @@ when Seneca AI is running:
 
 ![Swagger Seneca AI REST API documentation](images/swagger-seneca-ai-rest-api.png)
 
+## Qdrant and memory-worker containers
+
+`qdrant` is a vector database with an index of the user's past conversations,
+and `memory-worker` (same image as `api`) keeps it up to date from MongoDB.
+The API searches it to give the chat long-term memory. Neither publishes a
+port. See [memory.md](memory.md).
+
 ## MongoDB container (Coming soon)
 
 Container that runs MongoDB to maintain the historic of chats between Seneca AI and the user.

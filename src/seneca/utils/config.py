@@ -47,7 +47,7 @@ class AppConfig:
         )
     )
     ollama_model: str = field(
-        default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2")
+        default_factory=lambda: os.getenv("OLLAMA_MODEL") or "hadad/LFM2.5-1.2B:Q4_K_M"
     )
     anthropic_api_key: str = field(
         default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", "")
@@ -78,6 +78,54 @@ class AppConfig:
     # busy until it ends, so this bounds the concurrent replies.
     api_threads: int = field(
         default_factory=lambda: int(os.getenv("API_THREADS", "16"))
+    )
+
+    # Long-term memory (seneca.memory): search across past conversations.
+    # Used by the api (search) and memory-worker (indexing) containers.
+    memory_enabled: bool = field(
+        default_factory=lambda: os.getenv("MEMORY_ENABLED", "false").strip().lower() in {"1", "true", "yes"}
+    )
+    qdrant_url: str = field(
+        default_factory=lambda: os.getenv("QDRANT_URL", "http://localhost:6333")
+    )
+    qdrant_api_key: str = field(
+        default_factory=lambda: os.getenv("QDRANT_API_KEY", "")
+    )
+    # Ollama embedding model (served by the same Ollama as the chat model)
+    embedding_model: str = field(
+        default_factory=lambda: os.getenv("EMBEDDING_MODEL", "bge-m3")
+    )
+    # How long Ollama keeps the embedding model loaded after a request
+    embedding_keep_alive: str = field(
+        default_factory=lambda: os.getenv("EMBEDDING_KEEP_ALIVE", "30m")
+    )
+    # Most passages from past conversations added to the prompt
+    memory_top_k: int = field(
+        default_factory=lambda: int(os.getenv("MEMORY_TOP_K", "5"))
+    )
+    # Minimum cosine similarity of a passage (tune it with seneca.memory.evaluate)
+    memory_min_score: float = field(
+        default_factory=lambda: float(os.getenv("MEMORY_MIN_SCORE", "0.5"))
+    )
+    # Characters of the memory block in the prompt (~4 characters per token)
+    memory_max_chars: int = field(
+        default_factory=lambda: int(os.getenv("MEMORY_MAX_CHARS", "4000"))
+    )
+    # Seconds the chat waits for the memory search before answering without it
+    memory_search_timeout: float = field(
+        default_factory=lambda: float(os.getenv("MEMORY_SEARCH_TIMEOUT", "3"))
+    )
+    # The running summary of a conversation is updated every this many turns (0 = off)
+    memory_summary_every_turns: int = field(
+        default_factory=lambda: int(os.getenv("MEMORY_SUMMARY_EVERY_TURNS", "6"))
+    )
+    # Seconds the worker waits when there is nothing to index
+    memory_worker_interval: float = field(
+        default_factory=lambda: float(os.getenv("MEMORY_WORKER_INTERVAL", "5"))
+    )
+    # Seconds between clean-ups of the memory of deleted conversations
+    memory_cleanup_interval: float = field(
+        default_factory=lambda: float(os.getenv("MEMORY_CLEANUP_INTERVAL", "600"))
     )
 
 

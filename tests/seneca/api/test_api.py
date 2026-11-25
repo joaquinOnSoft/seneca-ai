@@ -553,24 +553,43 @@ def test_get_supported_languages_invalid_api_key(client, mock_db_client):
 
 # --- Tests for /senecaai/v1/health ---
 
+@pytest.fixture(autouse=True)
+def no_memory_service():
+    with patch('seneca.api.api.memory_service', None):
+        yield
+
+
 def test_health_check_model_loaded(client, mock_whisper_model_fixture, mock_db_client):
     response = client.get(API_METHOD_HEALTH)
     assert response.status_code == HTTPStatus.OK
-    assert json.loads(response.data) == {"status": "ok", "model_status": "loaded"}
+    assert json.loads(response.data) == {"status": "ok", "model_status": "loaded",
+                                          "memory_status": "disabled"}
 
 
 def test_health_check_google_backend(client, mock_db_client):
     with patch('seneca.api.api.config.stt_backend', 'google'):
         response = client.get(API_METHOD_HEALTH)
         assert response.status_code == HTTPStatus.OK
-        assert json.loads(response.data) == {"status": "ok", "model_status": "google_online"}
+        assert json.loads(response.data) == {"status": "ok", "model_status": "google_online",
+                                              "memory_status": "disabled"}
 
 
 def test_health_check_model_not_loaded(client, mock_db_client):
     with patch('seneca.api.api.model', None):
         response = client.get(API_METHOD_HEALTH) # Health check itself should return 503 if model not loaded
         assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
-        assert json.loads(response.data) == {"status": "degraded", "model_status": "not loaded"}
+        assert json.loads(response.data) == {"status": "degraded", "model_status": "not loaded",
+                                              "memory_status": "disabled"}
+
+
+def test_health_check_reports_memory_status(client, mock_whisper_model_fixture, mock_db_client):
+    memory = MagicMock()
+    memory.status.return_value = "unavailable"
+    with patch('seneca.api.api.memory_service', memory):
+        response = client.get(API_METHOD_HEALTH)
+    # Memory is optional: the API stays healthy without it
+    assert response.status_code == HTTPStatus.OK
+    assert json.loads(response.data)["memory_status"] == "unavailable"
 
 
 # --- New test for Rate Limiting ---

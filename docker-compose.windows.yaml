@@ -13,8 +13,9 @@
 #    · api.cap_add     — removed (Linux capabilities, ignored/unsupported on Windows)
 #    · volumes.ollama_models.driver_opts.device  — Windows default path
 #    · volumes.mongodb_data.driver_opts.device   — Windows default path
+#    · volumes.huggingface_cache / qdrant_storage — Windows default paths
 #
-#  Both volumes are already declared in docker-compose.yaml with a Linux
+#  The volumes are already declared in docker-compose.yaml with a Linux
 #  default path. Compose merges named-volume config by key across -f files,
 #  so this override only needs to replace `device` — `driver`, `type` and
 #  `o: bind` are inherited from the base file untouched.
@@ -48,9 +49,9 @@ services:
 #  Files\..." would need every backslash doubled ("C:\\Program Files\\...").
 #  Single quotes avoid that trap entirely.
 #
-#  ${OLLAMA_MODELS_PATH:-...} / ${MONGODB_DATA_PATH:-...} / ${HF_CACHE_PATH:-...}
-#  let you still override any of these paths per-machine via a local .env file without editing
-#  this file.
+#  ${OLLAMA_MODELS_PATH:-...} / ${MONGODB_DATA_PATH:-...} / ${HF_CACHE_PATH:-...} /
+#  ${QDRANT_STORAGE_PATH:-...} let you still override any of these paths per-machine via a
+#  local .env file without editing this file.
 volumes:
   ollama_models:
     driver_opts:
@@ -63,3 +64,7 @@ volumes:
   huggingface_cache:
     driver_opts:
       device: '${HF_CACHE_PATH:-C:\Program Files\SenecaAI\volumes\huggingface}'
+
+  qdrant_storage:
+    driver_opts:
+      device: '${QDRANT_STORAGE_PATH:-C:\Program Files\SenecaAI\volumes\qdrant}'

@@ -52,6 +52,8 @@ from langchain_core.messages import (
     messages_to_dict,
 )
 
+from seneca.memory.service import MemoryService, format_summary
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
@@ -274,11 +276,18 @@ def sse(event: str, data: Dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def history_to_messages(stored: List[Dict[str, Any]], max_messages: int) -> List[BaseMessage]:
-    """System prompt + the last *max_messages* stored user/assistant messages."""
+def history_to_messages(stored: List[Dict[str, Any]], max_messages: int,
+                        context: str = "") -> List[BaseMessage]:
+    """System prompt + the last *max_messages* stored user/assistant messages.
+
+    *context* (memory, summary of older messages) is appended to the system
+    prompt. It is one system message because some providers (Anthropic)
+    accept a single one, at the start.
+    """
     role_map = {"user": HumanMessage, "assistant": AIMessage}
     recent = stored[-max_messages:] if max_messages > 0 else stored
-    messages: List[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT)]
+    system = f"{SYSTEM_PROMPT}\n\n{context}" if context else SYSTEM_PROMPT
+    messages: List[BaseMessage] = [SystemMessage(content=system)]
     messages.extend(role_map[m["role"]](content=m["content"]) for m in recent if m.get("role") in role_map)
     return messages
 
@@ -339,11 +348,15 @@ class ChatService:
         Returns a new chat model; called once per turn.
     max_history_messages:
         Stored messages sent to the model as context (most recent ones).
+    memory:
+        Optional :class:`MemoryService`: related turns of the user's other
+        conversations are added to the prompt.
     """
 
     def __init__(self, db, llm_factory: Callable[[], BaseChatModel], max_history_messages: int = 50,
-                 provider: str = "", model: str = "") -> None:
+                 provider: str = "", model: str = "", memory: Optional[MemoryService] = None) -> None:
         self._db = db
+        self._memory = memory
         self._llm_factory = llm_factory
         self._max_history_messages = max_history_messages
         self._provider = provider
@@ -361,6 +374,20 @@ class ChatService:
                 logger.error("Could not create the LLM to check its capabilities: %s", exc)
                 return {"provider": self._provider, "model": self._model, "tool_calling": False}
         return {"provider": self._provider, "model": self._model, "tool_calling": self._tool_calling}
+
+    # -- prompt context --------------------------------------------------------
+
+    def prompt_context(self, conversation: Dict[str, Any], user_id: str) -> str:
+        """Extra system-prompt context: summary of older messages and memory."""
+        parts = []
+        stored = conversation.get("messages", [])
+        if 0 < self._max_history_messages < len(stored):
+            # The oldest messages do not fit: the worker's running summary stands in for them
+            parts.append(format_summary((conversation.get("memory") or {}).get("summary", "")))
+        if self._memory is not None:
+            query = next((m.get("content", "") for m in reversed(stored) if m.get("role") == "user"), "")
+            parts.append(self._memory.context(user_id, query, exclude_conversation_id=str(conversation["_id"])))
+        return "\n\n".join(part for part in parts if part)
 
     # -- turn lifecycle ------------------------------------------------------
 
@@ -434,7 +461,8 @@ class ChatService:
             llm = self._llm_factory()
             if tools:
                 llm = llm.bind_tools([_openai_tool(t) for t in tools])
-            messages = (history_to_messages(conversation.get("messages", []), self._max_history_messages)
+            messages = (history_to_messages(conversation.get("messages", []), self._max_history_messages,
+                                            self.prompt_context(conversation, user_id))
                         + state.messages)
 
             while True:

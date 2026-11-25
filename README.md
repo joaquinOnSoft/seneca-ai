@@ -47,6 +47,10 @@ seneca-ai/
 │       │   ├── agent.py         # Desktop chat agent: streams replies from the API, runs tools
 │       │   ├── conversation.py  # Domain models (Message, Conversation)
 │       │   └── api_storage.py   # Conversation history (read/delete) through the REST API
+│       ├── memory/              # Long-term memory (Qdrant index of past conversations)
+│       │   ├── service.py       # Search + prompt block, used by the chat
+│       │   ├── indexer.py       # MongoDB → Qdrant indexing and running summaries
+│       │   └── worker.py        # memory-worker container entry point
 │       ├── i18n/
 │       │   └── locale.py        # Babel-backed i18n helper
 │       ├── ui/
@@ -62,6 +66,7 @@ seneca-ai/
 │   ├── unit/                # Pure logic tests (no LLM, no UI)
 │   ├── seneca/api/          # REST API, HTTP client and MongoDB layer tests (mocked)
 │   ├── seneca/core/         # API-backed conversation store tests (mocked)
+│   ├── seneca/memory/       # Memory tests (in-process Qdrant, fake embedder)
 │   └── integration/         # LLM integration tests (require credentials)
 ├── .env.example
 ├── requirements.txt
@@ -161,7 +166,6 @@ empty, conversations are stored under the generic user `api_key_user`.
 |----------|----------------------------------------------|-------------------------------------------------------------------|
 | `POST`   | `/senecaai/v1/chat`                          | Send a message and stream the reply (SSE); creates the conversation if `conversation_id` is omitted |
 | `GET`    | `/senecaai/v1/chat/capabilities`             | LLM provider, model and tool-calling support                      |
-
 | `GET`    | `/senecaai/v1/conversations`                 | Paginated list, newest first (`convPerPage` ≤ 100, `numPage`). Messages only with `includeMessages=true` |
 | `GET`    | `/senecaai/v1/conversations/{id}`            | One conversation with all its messages                            |
 | `POST`   | `/senecaai/v1/conversations`                 | Create a conversation (`201` + `Location` header)                 |
@@ -170,6 +174,24 @@ empty, conversations are stored under the generic user `api_key_user`.
 | `DELETE` | `/senecaai/v1/conversations/{id}`            | Delete a conversation (`204`)                                     |
 
 The full Swagger documentation is served at `http://localhost:1414/apidocs`.
+
+### Long-term memory
+
+The API also remembers the user's other conversations: the `memory-worker`
+container indexes them into [Qdrant](https://qdrant.tech/), and the chat adds the passages related to
+the new message to the prompt. See [docs/memory.md](docs/memory.md).
+
+> **Qdrant has no API key.** The `qdrant` container publishes no port: it is
+> only reachable from the other containers in the internal `llm_net` Docker
+> network (`api` and `memory-worker`), not from the host or the local network.
+> A key would only protect against code
+> already running inside that network, which can read the Docker secrets
+> anyway. If you publish its port (e.g. `127.0.0.1:6333:6333` in
+> `docker-compose.override.yaml` to use the dashboard), bind it to
+> `127.0.0.1` only. If Qdrant ever has to be reachable from other machines,
+> set `QDRANT__SERVICE__API_KEY` on the container as a Docker secret and the
+> same value in `QDRANT_API_KEY` for `api` and `memory-worker` (the code
+> already sends it when set).
 
 ---
 
@@ -209,6 +231,9 @@ pytest tests/seneca/api/test_chat.py
 
 # Desktop chat agent and API-backed conversation store
 pytest tests/seneca/core/
+
+# Long-term memory (in-process Qdrant, fake embeddings)
+pytest tests/seneca/memory/
 
 # A single file, test or group of tests
 pytest tests/seneca/api/test_api.py

@@ -24,6 +24,7 @@ from werkzeug.exceptions import HTTPException
 
 from seneca.api.chat import ChatRequestError, ChatService, build_llm, model_name, parse_chat_request
 from seneca.api.database import MongoDatabase
+from seneca.memory.service import MemoryService
 from seneca.utils.config import config
 
 H265 = "HS256"
@@ -158,6 +159,10 @@ def init_mongodb():
 def setup_mongodb():
     init_mongodb()
 
+# --- Long-term memory (Qdrant, indexed by the memory-worker container) ---
+# Optional: the chat answers without memory when it is off or unavailable
+memory_service = MemoryService.from_config(config) if config.memory_enabled else None
+
 # --- Chat (LLM) ---
 # The LLM is created per turn, so a missing provider key only fails the chat requests
 chat_service = ChatService(
@@ -166,6 +171,7 @@ chat_service = ChatService(
     max_history_messages=config.chat_history_max_messages,
     provider=config.llm_provider,
     model=model_name(config),
+    memory=memory_service,
 )
 
 # --- Custom JSON Encoder for MongoDB ObjectId and datetime ---
@@ -239,9 +245,12 @@ def _raise_forbidden_or_not_found(_id, forbidden_message):
     raise NotFoundError("Conversation not found.")
 
 
+_INTERNAL_CONVERSATION_FIELDS = {"pending_turn", "memory"}
+
+
 def _public_conversation(conversation):
-    """Drop the internal chat state (pending tool calls) from a conversation document."""
-    return {k: v for k, v in conversation.items() if k != "pending_turn"}
+    """Drop the internal state (pending tool calls, memory index) from a conversation document."""
+    return {k: v for k, v in conversation.items() if k not in _INTERNAL_CONVERSATION_FIELDS}
 
 
 def _conversation_response(conversation, status=HTTPStatus.OK, headers=None):
@@ -735,6 +744,10 @@ def health_check():
             model_status:
               type: string
               enum: [loaded]
+            memory_status:
+              type: string
+              enum: [ok, empty, unavailable, disabled]
+              description: "Long-term memory (Qdrant). Informative only: the API works without it."
       503:
         description: "API is degraded, Faster-Whisper model is not loaded."
         schema:
@@ -748,13 +761,16 @@ def health_check():
               enum: [not loaded]
     """
     api.logger.info("Health check request received.")
+    memory_status = memory_service.status() if memory_service is not None else "disabled"
     if config.stt_backend == 'google':
-        return jsonify({"status": "ok", "model_status": "google_online"}), HTTPStatus.OK
+        return jsonify({"status": "ok", "model_status": "google_online",
+                        "memory_status": memory_status}), HTTPStatus.OK
     elif config.stt_backend == 'faster-whisper' and model is not None:
-        return jsonify({"status": "ok", "model_status": "loaded"}), HTTPStatus.OK
+        return jsonify({"status": "ok", "model_status": "loaded", "memory_status": memory_status}), HTTPStatus.OK
     else:
         api.logger.warning("Health check: Faster-Whisper model is not loaded or backend is unsupported.")
-        return jsonify({"status": "degraded", "model_status": "not loaded"}), HTTPStatus.SERVICE_UNAVAILABLE
+        return jsonify({"status": "degraded", "model_status": "not loaded",
+                        "memory_status": memory_status}), HTTPStatus.SERVICE_UNAVAILABLE
 
 
 # --- Authentication Endpoints ---
@@ -1267,6 +1283,8 @@ def delete_conversation(_id):
     if not deleted:
         _raise_forbidden_or_not_found(_id, "User does not have access to delete this conversation.")
 
+    if memory_service is not None:
+        memory_service.forget_conversation(_id)
     api.logger.info(f"Conversation {_id} deleted successfully for user {g.user_id}.")
     return Response(status=HTTPStatus.NO_CONTENT)
 

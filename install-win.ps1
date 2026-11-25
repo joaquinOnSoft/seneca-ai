@@ -9,6 +9,7 @@ $EnvFile      = Join-Path $ScriptDir ".env"
 $OllamaPath   = "C:\ProgramData\senecaai\volumes\ollama"
 $MongoPath    = "C:\ProgramData\senecaai\volumes\mongo" # New: Mongo data path
 $HfCachePath  = "C:\ProgramData\senecaai\volumes\huggingface" # Hugging Face cache (Whisper model)
+$QdrantPath   = "C:\ProgramData\senecaai\volumes\qdrant" # Qdrant index (long-term memory)
 
 # Docker Compose command: base file + Windows override
 $ComposeFiles = "-f docker-compose.yaml -f docker-compose.windows.yaml"
@@ -207,6 +208,9 @@ if (Test-Path $MarkerFile) {
     # Ensure .env has the correct Windows path for the Hugging Face cache
     Write-EnvVar -EnvVarName "HF_CACHE_PATH" -Path $HfCachePath -EnvFilePath $EnvFile
 
+    # Ensure .env has the correct Windows path for the Qdrant index
+    Write-EnvVar -EnvVarName "QDRANT_STORAGE_PATH" -Path $QdrantPath -EnvFilePath $EnvFile
+
     # Docker secrets used by the api and mongo containers
     New-DockerSecrets
 
@@ -222,6 +226,7 @@ if (Test-Path $MarkerFile) {
     Reset-DockerVolume -VolumeSuffix "ollama_models"
     Reset-DockerVolume -VolumeSuffix "mongodb_data"
     Reset-DockerVolume -VolumeSuffix "huggingface_cache"
+    Reset-DockerVolume -VolumeSuffix "qdrant_storage"
     # Build the images and start the containers in the background (detached),
     # so the script finishes instead of staying attached to the containers' logs
     Invoke-Expression "docker compose $ComposeFiles up -d --build"
@@ -322,6 +327,15 @@ if (-not (Test-Path $HfCachePath)) {
     Write-Host "Directory already exists: $HfCachePath" -ForegroundColor Yellow
 }
 
+# Prepare the directory for the Qdrant index (long-term memory)
+Write-Host "Preparing directories for Qdrant..." -ForegroundColor Cyan
+if (-not (Test-Path $QdrantPath)) {
+    New-Item -ItemType Directory -Path $QdrantPath -Force | Out-Null
+    Write-Host "Created directory: $QdrantPath" -ForegroundColor Green
+} else {
+    Write-Host "Directory already exists: $QdrantPath" -ForegroundColor Yellow
+}
+
 # Write OLLAMA_MODELS_PATH to .env so docker-compose picks up the Windows path
 Write-EnvVar -EnvVarName "OLLAMA_MODELS_PATH" -Path $OllamaPath -EnvFilePath $EnvFile
 
@@ -330,6 +344,9 @@ Write-EnvVar -EnvVarName "MONGODB_DATA_PATH" -Path $MongoPath -EnvFilePath $EnvF
 
 # Write HF_CACHE_PATH to .env
 Write-EnvVar -EnvVarName "HF_CACHE_PATH" -Path $HfCachePath -EnvFilePath $EnvFile
+
+# Write QDRANT_STORAGE_PATH to .env
+Write-EnvVar -EnvVarName "QDRANT_STORAGE_PATH" -Path $QdrantPath -EnvFilePath $EnvFile
 
 # Docker secrets used by the api and mongo containers
 New-DockerSecrets
@@ -352,6 +369,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     Reset-DockerVolume -VolumeSuffix "ollama_models"
     Reset-DockerVolume -VolumeSuffix "mongodb_data"
     Reset-DockerVolume -VolumeSuffix "huggingface_cache"
+    Reset-DockerVolume -VolumeSuffix "qdrant_storage"
     Invoke-Expression "docker compose $ComposeFiles up -d --build"
 
     Write-Host "============================================================" -ForegroundColor Green

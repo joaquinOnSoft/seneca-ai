@@ -14,7 +14,30 @@
 # |32 Gb	| Yes	  | qwen2.5:14b o phi3:14b      |
 # |64 Gb	| No	  | llama3:8b o command-r:35b   |
 # |64 Gb	| Yes	  | mixtral:8x7b o llama3.1:70b |
+#
+# The chosen model is written to OLLAMA_MODEL in .env, which docker compose
+# reads. Order of precedence:
+#   1. OLLAMA_MODEL already set (non-empty) in .env   -> kept, no question asked
+#   2. OLLAMA_MODEL environment variable              -> kept, no question asked
+#   3. otherwise the user picks a model and it is written to .env
+# This script is sourced by install-ubuntu.sh, so it uses `return`, not `exit`.
 # ==============================================================================
+
+SELECT_ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
+SELECT_ENV_EXAMPLE="$(dirname "$SELECT_ENV_FILE")/.env.example"
+
+ENV_FILE_MODEL=""
+if [ -f "$SELECT_ENV_FILE" ]; then
+    ENV_FILE_MODEL=$(grep -E '^OLLAMA_MODEL=' "$SELECT_ENV_FILE" | tail -n 1 | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs)
+fi
+if [ -n "$ENV_FILE_MODEL" ]; then
+    echo "Ollama model taken from .env: OLLAMA_MODEL=${ENV_FILE_MODEL}"
+    return 0 2>/dev/null || exit 0
+fi
+if [ -n "${OLLAMA_MODEL:-}" ]; then
+    echo "Ollama model taken from the environment: OLLAMA_MODEL=${OLLAMA_MODEL}"
+    return 0 2>/dev/null || exit 0
+fi
 
 # 1. Detect System RAM in Gigabytes
 TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -96,16 +119,25 @@ read -p "Do you want to install the recommended model (${MODEL_REC}) [R] or the 
 # Convert input to uppercase
 USER_CHOICE=$(echo "$USER_CHOICE" | tr '[:lower:]' '[:upper:]')
 
-# 6. Assign the environment variable based on choice
+# 6. Pick the model based on choice
 if [ "$USER_CHOICE" = "A" ]; then
-    export OLLAMA_AI_MODEL=$MODEL_ALT
+    SELECTED_MODEL=$MODEL_ALT
     echo "Selected Alternative Model."
 else
     # Defaults to Recommended if 'R', empty (ENTER), or any other key is pressed
-    export OLLAMA_AI_MODEL=$MODEL_REC
+    SELECTED_MODEL=$MODEL_REC
     echo "Selected Recommended Model."
 fi
 
-# 7. Confirm the exported environment variable
-echo "Environment variable set: OLLAMA_AI_MODEL=${OLLAMA_AI_MODEL}"
+# 7. Write it to .env (created from .env.example if missing)
+if [ ! -f "$SELECT_ENV_FILE" ] && [ -f "$SELECT_ENV_EXAMPLE" ]; then
+    cp "$SELECT_ENV_EXAMPLE" "$SELECT_ENV_FILE"
+    echo "Created $SELECT_ENV_FILE from .env.example"
+fi
+if grep -qE '^OLLAMA_MODEL=' "$SELECT_ENV_FILE" 2>/dev/null; then
+    sed -i "s|^OLLAMA_MODEL=.*|OLLAMA_MODEL=${SELECTED_MODEL}|" "$SELECT_ENV_FILE"
+else
+    echo "OLLAMA_MODEL=${SELECTED_MODEL}" >> "$SELECT_ENV_FILE"
+fi
+echo "Written to .env: OLLAMA_MODEL=${SELECTED_MODEL}"
 echo "=================================================="

@@ -15,12 +15,16 @@ Desktop app ──POST /senecaai/v1/chat──► API (Flask) ──► LLM (Oll
 Authentication is the same as for the other endpoints: `X-SENECA-AI-API-KEY`
 (plus the optional `X-SENECA-AI-USER-ID`), or `Authorization: Bearer <JWT>`.
 
+With long-term memory enabled, the server also adds passages of the user's
+other conversations to the prompt, and a summary of the oldest messages of
+long conversations. See [memory.md](memory.md).
+
 ## Configuration (api container)
 
 | Variable                    | Default                    | Description                                         |
 |-----------------------------|----------------------------|-----------------------------------------------------|
 | `LLM_PROVIDER`              | `ollama`                   | `ollama`, `openai` or `anthropic`                   |
-| `OLLAMA_MODEL`              | from `OLLAMA_AI_MODEL`     | Model served by the `ollama` container              |
+| `OLLAMA_MODEL`              | `hadad/LFM2.5-1.2B:Q4_K_M` | Model served by the `ollama` container (from `.env`, else the environment) |
 | `OPENAI_API_KEY` / `OPENAI_MODEL`       | – / `gpt-4o-mini` | Only with `LLM_PROVIDER=openai`             |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | – / `claude-3-haiku-20240307` | Only with `LLM_PROVIDER=anthropic` |
 | `CHAT_HISTORY_MAX_MESSAGES` | `50`                       | Most recent stored messages sent to the LLM         |

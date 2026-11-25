@@ -67,6 +67,8 @@ class MongoDatabase:
                 [("user_id", ASCENDING), ("created_at", DESCENDING)],
                 name="user_id_created_at"
             )
+            # The memory worker scans conversations by updated_at
+            self.conversations_collection.create_index([("updated_at", ASCENDING)], name="updated_at")
         except PyMongoError as e:
             self.logger.warning(f"Could not create MongoDB indexes: {e}")
 
@@ -88,8 +90,9 @@ class MongoDatabase:
     def get_conversations(self, user_id, skip=0, limit=20, include_messages=False):
         if self.conversations_collection is None:
             raise PyMongoError("Conversations collection not initialized.")
-        # pending_turn is internal chat state (see seneca.api.chat), never listed
-        projection = {"pending_turn": 0} if include_messages else {"messages": 0, "pending_turn": 0}
+        # pending_turn (seneca.api.chat) and memory (seneca.memory) are internal state, never listed
+        internal = {"pending_turn": 0, "memory": 0}
+        projection = internal if include_messages else {"messages": 0, **internal}
         return list(self.conversations_collection.find(
             {"user_id": user_id}, projection
         ).sort("created_at", -1).skip(skip).limit(limit))
@@ -125,9 +128,12 @@ class MongoDatabase:
     def update_conversation(self, conv_id_str, user_id, update_fields):
         if self.conversations_collection is None:
             raise PyMongoError("Conversations collection not initialized.")
+        update = {"$set": {**update_fields, "updated_at": datetime.now(timezone.utc)}}
+        if "messages" in update_fields:
+            # Messages replaced: the memory worker must index the conversation again
+            update["$unset"] = {"memory": ""}
         result = self.conversations_collection.update_one(
-            {"_id": ObjectId(conv_id_str), "user_id": user_id},
-            {"$set": {**update_fields, "updated_at": datetime.now(timezone.utc)}}
+            {"_id": ObjectId(conv_id_str), "user_id": user_id}, update
         )
         return result.matched_count > 0
 
@@ -163,6 +169,43 @@ class MongoDatabase:
             {"_id": ObjectId(conv_id_str), "user_id": user_id}, update
         )
         return result.matched_count > 0
+
+    # --- Memory index state (see seneca.memory.indexer) ---
+    def conversations_to_index(self, collection, limit=20):
+        """Conversations whose turns are not (fully) in the Qdrant *collection* yet.
+
+        Skips the ones waiting for tool results: their turn is not finished.
+        """
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        query = {
+            "pending_turn": {"$exists": False},
+            "$or": [
+                {"memory.collection": {"$ne": collection}},
+                {"$expr": {"$lt": ["$memory.synced_at", "$updated_at"]}},
+            ],
+        }
+        return list(self.conversations_collection.find(query).sort("updated_at", ASCENDING).limit(limit))
+
+    def set_memory_state(self, conv_id_str, memory):
+        """Store the indexing state of a conversation (does not touch updated_at)."""
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        self.conversations_collection.update_one({"_id": ObjectId(conv_id_str)}, {"$set": {"memory": memory}})
+
+    def existing_conversation_ids(self, conv_id_strs):
+        """The subset of *conv_id_strs* that still exist."""
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        object_ids = [ObjectId(i) for i in conv_id_strs if ObjectId.is_valid(i)]
+        found = self.conversations_collection.find({"_id": {"$in": object_ids}}, {"_id": 1})
+        return {str(doc["_id"]) for doc in found}
+
+    def reset_memory_state(self):
+        """Mark every conversation as not indexed (re-index from scratch)."""
+        if self.conversations_collection is None:
+            raise PyMongoError("Conversations collection not initialized.")
+        return self.conversations_collection.update_many({}, {"$unset": {"memory": ""}}).modified_count
 
     def delete_conversation(self, conv_id_str, user_id):
         if self.conversations_collection is None:
