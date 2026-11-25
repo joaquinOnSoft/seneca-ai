@@ -29,6 +29,17 @@ Desktop app ── POST /chat ──► API: system prompt + memory + history �
 | `memory-worker` | Same image as `api`, command `python -m seneca.memory.worker`. Indexes the conversations. |
 | `ollama`        | Also serves the embedding model. The worker pulls it on its first start (`bge-m3`, about 1.2 GB of disk and RAM). |
 
+The chat model (`OLLAMA_MODEL`) and the embedding model can be loaded in
+Ollama at the same time, so count about 1.2 GB more RAM than the chat model
+alone when you choose it. The installer suggests a chat model from the
+detected RAM (see [Docker containers](containers.md#ollama-container)) and
+does not count the embedding model.
+
+The chat model also answers with the memory fragments and writes the
+running summaries. Very small models (1-2B parameters) sometimes ignore a
+fragment that holds the answer; if recall looks poor, try a larger
+`OLLAMA_MODEL` before tuning `MEMORY_MIN_SCORE`.
+
 ## How conversations are indexed
 
 1. The worker splits each conversation into **turns**: a user message plus
@@ -85,7 +96,9 @@ looks like instructions (*prompt injection*).
 
 ## Configuration
 
-Set them in `.env` and apply them with `docker compose up -d`.
+Set them in `.env` and apply them with `docker compose up -d`. As with
+`OLLAMA_MODEL`, a variable exported in the shell that runs `docker compose`
+wins over `.env`.
 
 | Variable                     | Default  | Description |
 |------------------------------|----------|-------------|
