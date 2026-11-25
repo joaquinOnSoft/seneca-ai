@@ -249,6 +249,10 @@ pytest tests/seneca/api/test_chat.py
 # Desktop chat agent and API-backed conversation store
 pytest tests/seneca/core/
 
+# Ollama model selection scripts (fake RAM and GPU; each shell is skipped
+# if bash or pwsh is not installed)
+pytest tests/unit/test_select_ollama_model.py
+
 # Long-term memory (in-process Qdrant, fake embeddings)
 pytest tests/seneca/memory/
 
