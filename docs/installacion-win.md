@@ -39,7 +39,7 @@ The models suggested for each tier are listed in
 > reboot between its two executions:
 >
 > ```powershell
-> $env:OLLAMA_MODEL = "qwen2.5:3b"; .\install-win.ps1
+> $env:OLLAMA_MODEL = "hadad/LFM2.5-1.2B:Q4_K_M"; .\install-win.ps1
 > ```
 
 ## Uninstall

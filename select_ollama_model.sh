@@ -4,16 +4,16 @@
 # Script to detect hardware (RAM & GPU) and select the optimal Ollama AI model
 # ==============================================================================
 #
-# | Detected RAM | Tier  | GPU | AI model                     |
-# | ------------ | ----- | --- | ---------------------------- |
-# | < 15 GB      | 8 GB  | No  | qwen2.5:1.5b or llama3.2:1b  |
-# | < 15 GB      | 8 GB  | Yes | qwen2.5:3b or qwen2.5:1.5b   |
-# | 15 - 30 GB   | 16 GB | No  | qwen2.5:3b or llama3.2:3b    |
-# | 15 - 30 GB   | 16 GB | Yes | mistral:7b or llama3:8b      |
-# | 31 - 62 GB   | 32 GB | No  | llama3:8b or gemma2:9b       |
-# | 31 - 62 GB   | 32 GB | Yes | qwen2.5:14b or phi3:14b      |
-# | >= 63 GB     | 64 GB | No  | llama3:8b or command-r:35b   |
-# | >= 63 GB     | 64 GB | Yes | mixtral:8x7b or llama3.1:70b |
+# | Detected RAM | Tier  | GPU | AI model                                 |
+# | ------------ | ----- | --- | ---------------------------------------- |
+# | < 15 GB      | 8 GB  | No  | qwen2.5:1.5b or llama3.2:1b              |
+# | < 15 GB      | 8 GB  | Yes | hadad/LFM2.5-1.2B:Q4_K_M or qwen2.5:1.5b |
+# | 15 - 30 GB   | 16 GB | No  | hadad/LFM2.5-1.2B:Q4_K_M or llama3.2:3b  |
+# | 15 - 30 GB   | 16 GB | Yes | mistral:7b or llama3:8b                  |
+# | 31 - 62 GB   | 32 GB | No  | llama3:8b or gemma2:9b                   |
+# | 31 - 62 GB   | 32 GB | Yes | qwen2.5:14b or phi3:14b                  |
+# | >= 63 GB     | 64 GB | No  | llama3:8b or command-r:35b               |
+# | >= 63 GB     | 64 GB | Yes | mixtral:8x7b or llama3.1:70b             |
 #
 # Each tier starts 1 GB below its size, because the OS reports a bit less RAM
 # than the installed RAM.
@@ -96,12 +96,12 @@ if [ "$RAM_TIER" -eq 8 ]; then
         MODEL_REC="qwen2.5:1.5b"
         MODEL_ALT="llama3.2:1b"
     else
-        MODEL_REC="qwen2.5:3b"
+        MODEL_REC="hadad/LFM2.5-1.2B:Q4_K_M"
         MODEL_ALT="qwen2.5:1.5b"
     fi
 elif [ "$RAM_TIER" -eq 16 ]; then
     if [ "$GPU_PRESENT" = "No" ]; then
-        MODEL_REC="qwen2.5:3b"
+        MODEL_REC="hadad/LFM2.5-1.2B:Q4_K_M"
         MODEL_ALT="llama3.2:3b"
     else
         MODEL_REC="mistral:7b"

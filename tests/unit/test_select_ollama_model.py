@@ -28,8 +28,8 @@ TIERS = [(8, 8), (14, 8), (15, 16), (16, 16), (30, 16), (31, 32), (32, 32), (62,
 # Tier -> (recommended, alternative) model without / with GPU
 MODELS = {
     (8, False): ("qwen2.5:1.5b", "llama3.2:1b"),
-    (8, True): ("qwen2.5:3b", "qwen2.5:1.5b"),
-    (16, False): ("qwen2.5:3b", "llama3.2:3b"),
+    (8, True): ("hadad/LFM2.5-1.2B:Q4_K_M", "qwen2.5:1.5b"),
+    (16, False): ("hadad/LFM2.5-1.2B:Q4_K_M", "llama3.2:3b"),
     (16, True): ("mistral:7b", "llama3:8b"),
     (32, False): ("llama3:8b", "gemma2:9b"),
     (32, True): ("qwen2.5:14b", "phi3:14b"),
@@ -142,7 +142,7 @@ def test_recommended_and_alternative_models(runner, tier, gpu):
 def test_env_file_is_created_from_example(runner):
     runner.run(ram_gb=16, answer="R")
     lines = runner.project.joinpath(".env").read_text().splitlines()
-    assert lines == ["A=1", "OLLAMA_MODEL=qwen2.5:3b", "B=2"]
+    assert lines == ["A=1", "OLLAMA_MODEL=hadad/LFM2.5-1.2B:Q4_K_M", "B=2"]
 
 
 def test_model_in_env_file_is_kept(runner):
@@ -163,14 +163,14 @@ def test_environment_variable_is_written_to_env_file(runner):
 
 def test_environment_variable_replaces_empty_value(runner):
     runner.project.joinpath(".env").write_text("A=1\nOLLAMA_MODEL=\n")
-    runner.run(ollama_model="qwen2.5:3b")
-    assert runner.project.joinpath(".env").read_text().splitlines() == ["A=1", "OLLAMA_MODEL=qwen2.5:3b"]
+    runner.run(ollama_model="hadad/LFM2.5-1.2B:Q4_K_M")
+    assert runner.project.joinpath(".env").read_text().splitlines() == ["A=1", "OLLAMA_MODEL=hadad/LFM2.5-1.2B:Q4_K_M"]
 
 
 def test_model_is_appended_when_missing(runner):
     runner.project.joinpath(".env").write_text("A=1\n")
-    runner.run(ollama_model="qwen2.5:3b")
-    assert runner.project.joinpath(".env").read_text().splitlines() == ["A=1", "OLLAMA_MODEL=qwen2.5:3b"]
+    runner.run(ollama_model="hadad/LFM2.5-1.2B:Q4_K_M")
+    assert runner.project.joinpath(".env").read_text().splitlines() == ["A=1", "OLLAMA_MODEL=hadad/LFM2.5-1.2B:Q4_K_M"]
 
 
 def test_special_characters_are_written_verbatim(runner):

@@ -44,7 +44,7 @@ The models suggested for each tier are listed in
 >
 > ```shell
 > $ sudo -E ./install-ubuntu.sh
-> $ sudo OLLAMA_MODEL=qwen2.5:3b ./install-ubuntu.sh
+> $ sudo OLLAMA_MODEL=hadad/LFM2.5-1.2B:Q4_K_M ./install-ubuntu.sh
 > ```
 
 ## Uninstall
