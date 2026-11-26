@@ -162,6 +162,28 @@ function Start-DockerEngine {
 }
 
 # ============================================================
+# FUNCTION: Build the images and start the containers in the
+# background, retrying up to 3 times. The first start can fail on
+# its own: with an empty data folder, the official MongoDB image
+# starts a temporary server to create the root user and then the
+# real one, which sometimes finds the port still in use and exits.
+# Docker restarts it and it works, but `docker compose up` has
+# already given up on the containers that depend on it.
+# ============================================================
+function Start-Containers {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Invoke-Expression "docker compose $ComposeFiles up -d --build"
+        if ($LASTEXITCODE -eq 0) { return }
+        if ($attempt -eq 3) {
+            Write-Host "ERROR: the containers did not start. Check them with: docker compose $ComposeFiles ps" -ForegroundColor Red
+            Exit 1
+        }
+        Write-Host "Some containers did not start (attempt $attempt of 3). Retrying in 15 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 15
+    }
+}
+
+# ============================================================
 # BRANCH: Second execution (post-reboot)
 # ============================================================
 if (Test-Path $MarkerFile) {
@@ -229,7 +251,7 @@ if (Test-Path $MarkerFile) {
     Reset-DockerVolume -VolumeSuffix "qdrant_storage"
     # Build the images and start the containers in the background (detached),
     # so the script finishes instead of staying attached to the containers' logs
-    Invoke-Expression "docker compose $ComposeFiles up -d --build"
+    Start-Containers
 
     Write-Host "============================================================" -ForegroundColor Green
     Write-Host " Installation complete!" -ForegroundColor Green
@@ -370,7 +392,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     Reset-DockerVolume -VolumeSuffix "mongodb_data"
     Reset-DockerVolume -VolumeSuffix "huggingface_cache"
     Reset-DockerVolume -VolumeSuffix "qdrant_storage"
-    Invoke-Expression "docker compose $ComposeFiles up -d --build"
+    Start-Containers
 
     Write-Host "============================================================" -ForegroundColor Green
     Write-Host " Installation complete!" -ForegroundColor Green

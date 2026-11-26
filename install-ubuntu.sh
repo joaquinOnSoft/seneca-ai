@@ -80,7 +80,22 @@ if docker info &> /dev/null; then
 else
     DOCKER="sudo docker"
 fi
-$DOCKER compose up -d --build
+# Retried because the first start can fail on its own: with an empty data
+# folder, the official MongoDB image starts a temporary server to create the
+# root user and then the real one, which sometimes finds the port still in use
+# and exits. Docker restarts it and it works, but `docker compose up` has
+# already given up on the containers that depend on it.
+for attempt in 1 2 3; do
+    if $DOCKER compose up -d --build; then
+        break
+    fi
+    if [ "$attempt" -eq 3 ]; then
+        echo "ERROR: the containers did not start. Check them with: docker compose ps"
+        exit 1
+    fi
+    echo "Some containers did not start (attempt $attempt of 3). Retrying in 15 seconds..."
+    sleep 15
+done
 
 echo "--------------------------------------------------------"
 echo "Seneca AI containers started in the background."
