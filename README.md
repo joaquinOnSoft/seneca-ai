@@ -29,6 +29,11 @@ To install Seneca AI, follow the instructions in the tutorial for your operating
 
 Seneca AI relies on [Docker containers](docs/containers.md) to run all the services required to provide the service
 
+To uninstall it, run `sudo ./uninstall-ubuntu.sh` (Linux) or
+`.\uninstall-win.ps1` (Windows, as administrator). They remove the
+containers and ask before deleting the data volumes or Docker; see the
+*Uninstall* section of each installation guide.
+
 ## Project Structure
 
 ```

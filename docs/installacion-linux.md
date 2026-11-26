@@ -46,3 +46,26 @@ The models suggested for each tier are listed in
 > $ sudo -E ./install-ubuntu.sh
 > $ sudo OLLAMA_MODEL=qwen2.5:3b ./install-ubuntu.sh
 > ```
+
+## Uninstall
+
+Run the uninstaller from the project folder:
+
+```shell
+$ sudo ./uninstall-ubuntu.sh
+```
+
+1. It removes the Seneca AI containers, their network and their images.
+2. It asks whether to delete the data volumes (folders under
+   `/opt/senecaai/volumes`). **This deletes all the conversations, the
+   long-term memory and the downloaded AI models, and cannot be undone.**
+   The default answer is no: the data is kept and a new installation
+   reuses it.
+3. It asks whether to uninstall Docker (default: no). Docker may be used by
+   other applications; if you uninstall it, it also asks whether to delete
+   the images, containers and volumes of all of them
+   (`/var/lib/docker`, `/var/lib/containerd`).
+
+The project folder, with `.env` and the secrets in `docker/`, is kept:
+delete it by hand when you no longer need it. To see what the uninstaller
+would do without changing anything, run `sudo ./uninstall-ubuntu.sh --dry-run`.

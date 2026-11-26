@@ -42,6 +42,32 @@ The models suggested for each tier are listed in
 > $env:OLLAMA_MODEL = "qwen2.5:3b"; .\install-win.ps1
 > ```
 
+## Uninstall
+
+In a terminal opened with **Run as administrator**, run the uninstaller from
+the project folder:
+
+```powershell
+cd "c:\Program Files\Seneca-AI"
+.\uninstall-win.ps1
+```
+
+1. It removes the Seneca AI containers, their network and their images, and
+   the installer's leftovers (post-reboot scheduled task and marker file).
+2. It asks whether to delete the data volumes (folders under
+   `C:\ProgramData\senecaai\volumes`). **This deletes all the conversations,
+   the long-term memory and the downloaded AI models, and cannot be undone.**
+   The default answer is no: the data is kept and a new installation
+   reuses it.
+3. It asks whether to uninstall Docker Desktop (default: no). Docker may be
+   used by other applications, and uninstalling it deletes their images,
+   containers and volumes too.
+
+The project folder, with `.env` and the secrets in `docker\`, is kept:
+delete it by hand when you no longer need it. Python and WSL, which the
+installer may have installed, are kept too. To see what the uninstaller
+would do without changing anything, run `.\uninstall-win.ps1 -DryRun`.
+
 ## Troubleshooting
 
 ### Power Shell scrips execution is not enabled
