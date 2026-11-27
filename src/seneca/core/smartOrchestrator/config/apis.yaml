@@ -1,0 +1,19 @@
+# API del banco (ejemplo)
+banco:
+  base_url: "https://api.tubanco.es"
+  endpoints:
+    intereses_hipoteca: "/hipotecas/interes"
+    simulador_cuota: "/hipotecas/simular"
+  auth:
+    token: "TU_TOKEN_SEGURO"  # Reemplazar con token real
+
+# Configuración para notificaciones
+notificaciones:
+  whatsapp:
+    driver_path: "/usr/local/bin/chromedriver"  # Ruta a chromedriver
+    qr_timeout: 30  # Tiempo para escanear QR (segundos)
+  email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: "tu_email@gmail.com"
+    password: "TU_CONTRASEÑA_APP"  # Usar contraseña de aplicación
